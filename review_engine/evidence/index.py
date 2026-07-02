@@ -4,16 +4,19 @@ import hashlib
 import math
 import re
 from pathlib import Path
+
 from review_engine.config.settings import EMBEDDING_MODEL, INDEXES_DIR
 from review_engine.extraction.models import SourceChunk
 
 
 class LocalEmbeddingFunction:
     """Uses a cached sentence-transformer; never downloads. Falls back to local hashing."""
+
     def __init__(self):
         self.model = None
         try:
             from sentence_transformers import SentenceTransformer
+
             self.model = SentenceTransformer(EMBEDDING_MODEL, local_files_only=True)
         except Exception:
             self.model = None
@@ -43,6 +46,7 @@ class EvidenceIndex:
     def _get_collection(self):
         if self._collection is None:
             import chromadb
+
             client = chromadb.PersistentClient(path=str(self.root))
             name = "matter_" + hashlib.sha1(self.matter_id.encode()).hexdigest()[:16]
             self._collection = client.get_or_create_collection(name=name)
@@ -56,20 +60,43 @@ class EvidenceIndex:
         if not chunks:
             return 0
         texts = [chunk.text for chunk in chunks]
-        collection.add(ids=[c.source_ref for c in chunks], documents=texts,
-            embeddings=self.embedding.encode(texts), metadatas=[{
-                "document_name": c.document_name, "file_type": c.file_type,
-                "page": c.page if c.page is not None else -1,
-                "row": c.row if c.row is not None else -1,
-                "section": c.section or "", "citation": c.citation,
-            } for c in chunks])
+        collection.add(
+            ids=[chunk.source_ref for chunk in chunks],
+            documents=texts,
+            embeddings=self.embedding.encode(texts),
+            metadatas=[
+                {
+                    "document_name": chunk.document_name,
+                    "file_type": chunk.file_type,
+                    "page": chunk.page if chunk.page is not None else -1,
+                    "row": chunk.row if chunk.row is not None else -1,
+                    "section": chunk.section or "",
+                    "citation": chunk.citation,
+                }
+                for chunk in chunks
+            ],
+        )
         return len(chunks)
 
     def search(self, query: str, limit: int = 8) -> list[dict]:
         collection = self._get_collection()
         if collection.count() == 0:
             return []
-        result = collection.query(query_embeddings=self.embedding.encode([query]),
-            n_results=min(limit, collection.count()), include=["documents", "metadatas", "distances"])
-        return [{"source_ref": source_ref, "text": text, "citation": metadata["citation"], "distance": float(distance)}
-            for source_ref, text, metadata, distance in zip(result["ids"][0], result["documents"][0], result["metadatas"][0], result["distances"][0])]
+        result = collection.query(
+            query_embeddings=self.embedding.encode([query]),
+            n_results=min(limit, collection.count()),
+            include=["documents", "metadatas", "distances"],
+        )
+        rows = []
+        for source_ref, text, metadata, distance in zip(
+            result["ids"][0], result["documents"][0], result["metadatas"][0], result["distances"][0]
+        ):
+            rows.append(
+                {
+                    "source_ref": source_ref,
+                    "text": text,
+                    "citation": metadata["citation"],
+                    "distance": float(distance),
+                }
+            )
+        return rows

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
+
 from dateutil import parser as date_parser
+
 from review_engine.evidence.entities import PATTERNS
 from review_engine.extraction.models import SourceChunk
 
@@ -15,7 +17,8 @@ def _parse_date(value: str) -> datetime | None:
 
 
 def build_timeline(chunks: list[SourceChunk]) -> list[dict]:
-    timeline, seen = [], set()
+    timeline = []
+    seen: set[tuple[str, str, str]] = set()
     for chunk in chunks:
         for sentence in re.split(r"(?<=[.!?])\s+|\n+", chunk.text):
             for match in PATTERNS["date"].finditer(sentence):
@@ -25,6 +28,13 @@ def build_timeline(chunks: list[SourceChunk]) -> list[dict]:
                 event = sentence.strip()[:500]
                 key = (parsed.date().isoformat(), event, chunk.source_ref)
                 if key not in seen:
-                    timeline.append({"date": parsed.date().isoformat(), "event": event, "source_ref": chunk.source_ref, "citation": chunk.citation})
+                    timeline.append(
+                        {
+                            "date": parsed.date().isoformat(),
+                            "event": event,
+                            "source_ref": chunk.source_ref,
+                            "citation": chunk.citation,
+                        }
+                    )
                     seen.add(key)
     return sorted(timeline, key=lambda item: (item["date"], item["source_ref"]))

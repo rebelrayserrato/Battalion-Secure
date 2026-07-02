@@ -3,8 +3,12 @@ from __future__ import annotations
 from review_engine.extraction.models import SourceChunk
 
 VALID_CATEGORIES = {
-    "HR Legal Risk", "Fraud Red Flag", "Missing Document", "Contradiction",
-    "Timeline Issue", "Unsupported Finding",
+    "HR Legal Risk",
+    "Fraud Red Flag",
+    "Missing Document",
+    "Contradiction",
+    "Timeline Issue",
+    "Unsupported Finding",
 }
 VALID_CONFIDENCE = {"Low", "Medium", "High"}
 
@@ -22,25 +26,34 @@ def create_finding(candidate: dict) -> dict | None:
     unique = {}
     for source in sources:
         unique[source.source_ref] = {
-            "source_ref": source.source_ref, "document_name": source.document_name,
-            "page": source.page, "row": source.row, "section": source.section,
+            "source_ref": source.source_ref,
+            "document_name": source.document_name,
+            "page": source.page,
+            "row": source.row,
+            "section": source.section,
             "citation": source.citation,
         }
     return {
-        "title": candidate["title"], "category": category,
+        "title": candidate["title"],
+        "category": category,
         "explanation": candidate["explanation"],
-        "supporting_sources": list(unique.values()), "confidence": confidence,
+        "supporting_sources": list(unique.values()),
+        "confidence": confidence,
         "confidence_reason": candidate.get("confidence_reason", "Rule-based match requires human review."),
         "human_review_required": bool(candidate.get("human_review_required", True)),
     }
 
 
 def finalize_findings(candidates: list[dict]) -> list[dict]:
-    findings, seen = [], set()
+    findings = []
+    seen = set()
     for candidate in candidates:
         finding = create_finding(candidate)
         if finding:
-            key = (finding["title"], tuple(s["source_ref"] for s in finding["supporting_sources"]))
+            key = (
+                finding["title"],
+                tuple(source["source_ref"] for source in finding["supporting_sources"]),
+            )
             if key not in seen:
                 findings.append(finding)
                 seen.add(key)
