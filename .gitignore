@@ -1,0 +1,17 @@
+.venv/
+.tools/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+data/review_engine.sqlite3
+data/review_engine.sqlite3-*
+data/uploads/*
+!data/uploads/.gitkeep
+data/indexes/*
+!data/indexes/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/matters/*
+!data/matters/.gitkeep
+*.docx
+*.pdf
