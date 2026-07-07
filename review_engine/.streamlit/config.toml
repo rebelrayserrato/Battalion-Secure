@@ -1,0 +1,18 @@
+# Streamlit config for the internal-only, auth-gated deploy (RAYAAAA-194).
+# Env vars in the Dockerfile take precedence; this file documents intent and
+# covers a bare `streamlit run` outside the container.
+[server]
+headless = true
+address = "0.0.0.0"          # container-internal only; never published to host
+port = 8501
+baseUrlPath = "admin/review-engine"
+enableCORS = false
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false     # no telemetry egress
+
+[global]
+# Findings are risk INDICATORS to guide human review — not legal/fraud
+# determinations (RAYAAAA-192 AC4). Framing preserved in-app and portal-side.
+showWarningOnDirectExecution = false

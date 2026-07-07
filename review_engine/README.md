@@ -1,3 +1,25 @@
+<!-- ============================================================= -->
+<!-- RAYAAAA-194 DEPLOY BANNER — READ BEFORE UPLOADING ANYTHING     -->
+<!-- ============================================================= -->
+> ## ⚠️ SYNTHETIC / OWNER-INTERNAL DATA ONLY
+>
+> This service is deployed as an **internal-only** tool on the RAYSERR VPS, reachable
+> **only** through the owner-portal-authenticated admin route `/admin/review-engine`
+> (nginx `auth_request` → admin session check). It is **not** publicly routable.
+>
+> **Do NOT upload real client case files.** The GDPR erasure/retention sweep
+> (RAYAAAA-182 pattern) does **not** yet reach this tool's data store
+> (`data/review_engine.sqlite3` + `data/uploads/<matter_id>/` + Chroma vectors in
+> `data/indexes/<matter_id>/` — embeddings are personal data). Until the erasure
+> cascade (RAYAAAA-196) + retention purge job + DPIA sign-off (RAYAAAA-198) are live
+> and the CTO/QualityGuard sec/QA gate has passed, use **synthetic or the owner's own
+> internal documents only**. Real client PII is a one-way door gated on Counsel's
+> B1–B5 (see RAYAAAA-192/195).
+>
+> Findings here are **risk indicators to guide human review — not legal or fraud
+> determinations.**
+<!-- ============================================================= -->
+
 # Local Evidence Review Engine v0.1
 
 A local-first evidence review platform for document sets involving HR, legal-risk, and

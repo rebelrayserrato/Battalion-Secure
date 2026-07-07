@@ -1,0 +1,10 @@
+# Build context = repo root (compose builds with context ../Battalion-Secure).
+# Never bake any local data (real or synthetic) into the image — data lives in
+# the mounted named volume only (RAYAAAA-194 AC3).
+review_engine/data/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+review_engine/tests/
+.streamlit/secrets.toml
+.git/
