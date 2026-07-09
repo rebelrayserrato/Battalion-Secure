@@ -54,8 +54,14 @@ ENV STREAMLIT_SERVER_HEADLESS=true \
     PYTHONUNBUFFERED=1
 
 EXPOSE 8501
+# RAYAAAA-210: matter-API sidecar port (internal only; nginx auth gate is ingress).
+EXPOSE 8600
+# Healthcheck covers BOTH processes: the sidecar must answer before the container
+# is "healthy", so the portal producer never races an unstarted API.
 HEALTHCHECK --interval=15s --timeout=5s --retries=6 --start-period=90s \
-    CMD curl -fsS http://127.0.0.1:8501/admin/review-engine/_stcore/health || exit 1
+    CMD curl -fsS http://127.0.0.1:8501/admin/review-engine/_stcore/health \
+        && curl -fsS http://127.0.0.1:8600/admin/review-engine/api/health || exit 1
 
-# run_app.py wraps `streamlit run app/main.py`, inheriting the ENV above.
+# run_app.py starts the matter-API sidecar (uvicorn :8600) then `streamlit run
+# app/main.py`, both inheriting the ENV above.
 CMD ["python", "review_engine/run_app.py"]

@@ -24,6 +24,11 @@ class ReviewDatabase:
         connection = sqlite3.connect(self.path)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
+        # RAYAAAA-210: the Streamlit UI and the matter-API sidecar are two
+        # processes sharing this file. A busy timeout makes a concurrent writer
+        # wait for the lock instead of failing immediately with "database is
+        # locked". Writes here are tiny and short, so 5s is ample headroom.
+        connection.execute("PRAGMA busy_timeout = 5000")
         try:
             yield connection
             connection.commit()
