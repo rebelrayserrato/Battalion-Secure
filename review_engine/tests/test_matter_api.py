@@ -86,3 +86,71 @@ def test_token_gate(monkeypatch, tmp_path):
         f"{BASE}/matters", json={"name": "X"}, headers={"X-Internal-Token": "s3cret"}
     )
     assert ok.status_code == 201, ok.text
+
+
+# --- RAYAAAA-212: internal HTTP erase endpoint -----------------------------
+
+
+def test_erase_matter_clean_then_gone(monkeypatch, tmp_path):
+    client, db = _client(monkeypatch, tmp_path)
+
+    matter_id = client.post(
+        f"{BASE}/matters", json={"name": "Synthetic · Erase me"}
+    ).json()["matter_id"]
+    assert db.get_matter(matter_id) is not None
+
+    res = client.delete(f"{BASE}/matters/{matter_id}")
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["matter_id"] == matter_id
+    assert body["clean"] is True
+    assert body["residual_sqlite_rows"] == 0
+    assert body["sqlite_rows_deleted"] >= 1  # at least the matters row
+
+    # The matter is gone from the SAME shared store the fan-out reads.
+    assert db.get_matter(matter_id) is None
+    assert [m["id"] for m in db.list_matters()] == []
+
+
+def test_erase_unknown_matter_is_idempotent_noop(monkeypatch, tmp_path):
+    client, _ = _client(monkeypatch, tmp_path)
+    # Erasing a never-seen (or already-erased) matter is a clean 0/0 no-op → 200,
+    # so the fan-out's retry never wedges on an id Battalion never held.
+    res = client.delete(f"{BASE}/matters/MAT-doesnotexist")
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["clean"] is True
+    assert body["sqlite_rows_deleted"] == 0
+    assert body["residual_sqlite_rows"] == 0
+
+
+def test_erase_residual_fails_loud_500(monkeypatch, tmp_path):
+    client, _ = _client(monkeypatch, tmp_path)
+    import review_engine.api.matter_api as matter_api
+    from review_engine.privacy.erasure import ErasureReport
+
+    def _fake_erase(matter_id, database_path=None):
+        # Simulate a wipe that left residual behind (e.g. a locked file / partial
+        # failure) — the endpoint MUST fail loud so the fan-out retries.
+        return ErasureReport(matter_id=matter_id, residual_sqlite_rows=2)
+
+    monkeypatch.setattr(matter_api, "erase_matter", _fake_erase)
+    res = client.delete(f"{BASE}/matters/MAT-partial")
+    assert res.status_code == 500, res.text
+    detail = res.json()["detail"]
+    assert detail["clean"] is False
+    assert detail["residual_sqlite_rows"] == 2
+
+
+def test_erase_token_gate(monkeypatch, tmp_path):
+    client, _ = _client(monkeypatch, tmp_path, token="s3cret")
+    # No/invalid token -> 403, same posture as the create endpoint.
+    assert client.delete(f"{BASE}/matters/MAT-x").status_code == 403
+    assert (
+        client.delete(
+            f"{BASE}/matters/MAT-x", headers={"X-Internal-Token": "nope"}
+        ).status_code
+        == 403
+    )
+    ok = client.delete(f"{BASE}/matters/MAT-x", headers={"X-Internal-Token": "s3cret"})
+    assert ok.status_code == 200, ok.text

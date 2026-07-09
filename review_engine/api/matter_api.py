@@ -31,6 +31,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from review_engine.audits.database import ReviewDatabase
+from review_engine.privacy.erasure import erase_matter
 
 app = FastAPI(title="Battalion matter API", docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -61,6 +62,39 @@ class MatterResponse(BaseModel):
     created_at: str
 
 
+class MatterErasureResponse(BaseModel):
+    """Structured residual accounting the fan-out asserts on for fail-loud
+    behaviour (RAYAAAA-212 AC2). ``clean`` is True iff nothing survived across all
+    four stores; the counts mirror ``ErasureReport`` / the erase_cli JSON so the
+    HTTP transport is a drop-in for the CLI one."""
+
+    matter_id: str
+    clean: bool
+    sqlite_rows_deleted: int
+    upload_bytes_deleted: int
+    index_bytes_deleted: int
+    report_bytes_deleted: int
+    residual_sqlite_rows: int
+    residual_upload_bytes: int
+    residual_index_bytes: int
+    residual_report_bytes: int
+
+    @classmethod
+    def from_report(cls, report) -> "MatterErasureResponse":
+        return cls(
+            matter_id=report.matter_id,
+            clean=report.clean,
+            sqlite_rows_deleted=report.sqlite_rows_deleted,
+            upload_bytes_deleted=report.upload_bytes_deleted,
+            index_bytes_deleted=report.index_bytes_deleted,
+            report_bytes_deleted=report.report_bytes_deleted,
+            residual_sqlite_rows=report.residual_sqlite_rows,
+            residual_upload_bytes=report.residual_upload_bytes,
+            residual_index_bytes=report.residual_index_bytes,
+            residual_report_bytes=report.residual_report_bytes,
+        )
+
+
 @app.get(f"{_BASE}/health")
 def health() -> dict:
     return {"status": "ok"}
@@ -80,3 +114,33 @@ def create_matter(
         name=matter.get("name", name),
         created_at=matter.get("created_at", ""),
     )
+
+
+@app.delete(f"{_BASE}/matters/{{matter_id}}", response_model=MatterErasureResponse)
+def erase_matter_endpoint(
+    matter_id: str, _: None = Depends(_require_token)
+) -> MatterErasureResponse:
+    """GDPR Art.17 erase of a single matter across all four Battalion stores
+    (RAYAAAA-212). This is the internal HTTP transport the main-app erasure
+    fan-out (RAYAAAA-207) calls in place of the ``erase_cli`` docker shell-out.
+
+    Owns its store (Conway): the review engine — not the web tier — performs the
+    wipe, using the same verified ``erase_matter`` primitive as the CLI and the
+    retention sweep, against the SAME shared sqlite store the sidecar writes to.
+
+    Fail-loud contract (mirrors erase_cli's non-zero exit on residual): an erase
+    that leaves ANY residual returns 500 with the residual counts in ``detail`` so
+    the fan-out retries / fails loud and never records an orphaned matter as gone.
+    A clean erase — including the idempotent no-op for an unknown/already-erased
+    matter — returns 200 with an all-zero-residual report.
+    """
+    try:
+        report = erase_matter(matter_id, database_path=_db.path)
+    except ValueError as exc:
+        # Unsafe matter id (path traversal etc.) — never reached the store.
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    payload = MatterErasureResponse.from_report(report)
+    if not report.clean:
+        raise HTTPException(status_code=500, detail=payload.model_dump())
+    return payload
