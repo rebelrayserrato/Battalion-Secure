@@ -19,7 +19,7 @@ def _seed_matter(root: Path, matter_id: str) -> None:
     con = sqlite3.connect(db_path)
     con.executescript(
         """
-        CREATE TABLE IF NOT EXISTS matters(id TEXT PRIMARY KEY, matter_id TEXT, name TEXT);
+        CREATE TABLE IF NOT EXISTS matters(id TEXT PRIMARY KEY, name TEXT, description TEXT, jurisdiction TEXT, created_at TEXT);
         CREATE TABLE IF NOT EXISTS documents(id INTEGER PRIMARY KEY, matter_id TEXT, name TEXT);
         CREATE TABLE IF NOT EXISTS chunks(source_ref TEXT PRIMARY KEY, matter_id TEXT, text TEXT);
         CREATE TABLE IF NOT EXISTS entities(id INTEGER PRIMARY KEY, matter_id TEXT, source_ref TEXT, value TEXT);
@@ -27,7 +27,8 @@ def _seed_matter(root: Path, matter_id: str) -> None:
         CREATE TABLE IF NOT EXISTS audit_logs(id INTEGER PRIMARY KEY, matter_id TEXT, event_type TEXT);
         """
     )
-    con.execute("INSERT INTO matters(id, matter_id, name) VALUES(?,?,?)", (matter_id, matter_id, "syn"))
+    # matters is keyed by `id` (its PK) — there is NO matter_id column on it.
+    con.execute("INSERT INTO matters(id, name, description) VALUES(?,?,?)", (matter_id, "syn", "Jane Doe case"))
     con.execute("INSERT INTO documents(matter_id, name) VALUES(?,?)", (matter_id, "offer.pdf"))
     con.execute("INSERT INTO chunks(source_ref, matter_id, text) VALUES(?,?,?)", (f"{matter_id}#1", matter_id, "secret salary 90000"))
     con.execute("INSERT INTO entities(matter_id, source_ref, value) VALUES(?,?,?)", (matter_id, f"{matter_id}#1", "Jane Doe"))
@@ -55,7 +56,8 @@ def _residual_rows(db_path: Path, matter_id: str) -> int:
     con = sqlite3.connect(db_path)
     total = 0
     for t in ("matters", "documents", "chunks", "entities", "findings", "audit_logs"):
-        total += con.execute(f"SELECT COUNT(*) FROM {t} WHERE matter_id=?", (matter_id,)).fetchone()[0]
+        col = "id" if t == "matters" else "matter_id"
+        total += con.execute(f"SELECT COUNT(*) FROM {t} WHERE {col}=?", (matter_id,)).fetchone()[0]
     con.close()
     return total
 

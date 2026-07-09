@@ -38,11 +38,17 @@ from review_engine.config.settings import (
     UPLOADS_DIR,
 )
 
-# Tables that carry a matter_id column and therefore hold per-matter rows.
-# `entities` has no matter_id column of its own in older revisions, so it is
-# cleared both directly (current schema has matter_id) and via its source_ref
-# FK to chunks, to be robust across schema versions.
+# Per-matter tables and the column that carries the matter identifier.
+# NOTE: the `matters` table is keyed by its own primary key `id` (there is NO
+# `matter_id` column on it) — every other table references the matter via a
+# `matter_id` column. `entities` is handled specially (matter_id and/or the
+# source_ref -> chunks FK) for cross-schema robustness.
 _MATTER_TABLES = ("audit_logs", "findings", "entities", "chunks", "documents", "matters")
+
+
+def _match_col(table: str) -> str:
+    """The column that identifies the matter in a given table."""
+    return "id" if table == "matters" else "matter_id"
 
 
 def _dir_bytes(path: Path) -> int:
@@ -116,11 +122,12 @@ def _count_matter_rows(db: sqlite3.Connection, matter_id: str) -> int:
                 except sqlite3.OperationalError:
                     pass
             continue
+        col = _match_col(table)
         try:
-            cur = db.execute(f"SELECT COUNT(*) FROM {table} WHERE matter_id=?", (matter_id,))
+            cur = db.execute(f"SELECT COUNT(*) FROM {table} WHERE {col}=?", (matter_id,))
             total += cur.fetchone()[0]
         except sqlite3.OperationalError:
-            # Table or matter_id column absent in this schema revision.
+            # Table absent in this schema revision.
             pass
     return total
 
@@ -143,8 +150,9 @@ def _delete_sqlite_rows(database_path: Path, matter_id: str) -> tuple[int, int]:
         except sqlite3.OperationalError:
             pass
         for table in _MATTER_TABLES:
+            col = _match_col(table)
             try:
-                connection.execute(f"DELETE FROM {table} WHERE matter_id=?", (matter_id,))
+                connection.execute(f"DELETE FROM {table} WHERE {col}=?", (matter_id,))
             except sqlite3.OperationalError:
                 pass
         connection.commit()
