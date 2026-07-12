@@ -6,8 +6,29 @@ from review_engine.app.services import ReviewService
 from review_engine.llm_connectors.ollama import OllamaConnector
 from review_engine.reports.generator import generate_docx_report, generate_pdf_report
 
-st.set_page_config(page_title="Local Evidence Review", page_icon="🔎", layout="wide")
-st.title("Local Evidence Review")
+st.set_page_config(
+    page_title="Review Engine · RAYSERR Solutions",
+    page_icon="🔎",
+    layout="wide",
+)
+
+# RAYAAAA-227: brand the page as part of rayserrsolutions.com. The theme (navy
+# sidebar / light content) comes from .streamlit/config.toml; this hides the
+# leftover Streamlit chrome (default footer + deploy badge) so only the RAYSERR
+# brand shows. The colour palette matches the admin panel's admin.css.
+st.markdown(
+    """
+    <style>
+      footer {visibility: hidden;}
+      div[data-testid="stDecoration"] {display: none;}
+      a[href^="https://streamlit.io"], a[href^="https://share.streamlit.io"],
+      div[data-testid="stStatusWidget"] {display: none !important;}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.title("RAYSERR Solutions · Review Engine")
 st.caption(
     "Evidence-bound HR, legal-risk, and potential fraud indicator review. "
     "Local by default; human review is required."
@@ -21,6 +42,16 @@ def service() -> ReviewService:
 
 svc = service()
 with st.sidebar:
+    # RAYAAAA-227: persistent link back to the admin console so the Review Engine
+    # is never a dead end (Streamlit is a separate app on the auth-gated subpath;
+    # this is a plain outbound link, the auth proxy / PII gate are untouched).
+    st.markdown(
+        "<a href='https://rayserrsolutions.com/admin' target='_top' "
+        "style='display:inline-block;margin-bottom:0.75rem;color:#c8922a;"
+        "font-weight:600;text-decoration:none;font-size:0.85rem;'>"
+        "← Back to RAYSERR Admin</a>",
+        unsafe_allow_html=True,
+    )
     st.header("Matter workspace")
     matters = svc.db.list_matters()
     labels = {f"{m['name']} · {m['id']}": m["id"] for m in matters}

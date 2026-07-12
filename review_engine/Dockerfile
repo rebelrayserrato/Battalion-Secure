@@ -27,6 +27,12 @@ RUN pip install --no-cache-dir -r review_engine/requirements.txt
 
 COPY review_engine/ ./review_engine/
 
+# RAYAAAA-227: Streamlit resolves the per-project config at $CWD/.streamlit, and
+# the container CWD is /app (WORKDIR), so the theme in review_engine/.streamlit
+# would otherwise be ignored. Surface it at /app/.streamlit so the RAYSERR theme
+# actually applies. Server keys still come from the ENV block below.
+RUN cp -r review_engine/.streamlit /app/.streamlit
+
 # Non-root runtime user owns /app so the mounted data volume inherits it.
 RUN useradd -m -u 10001 appuser \
     && mkdir -p /app/review_engine/data \
