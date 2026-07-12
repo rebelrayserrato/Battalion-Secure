@@ -5,6 +5,7 @@ import streamlit as st
 from review_engine.app.services import ReviewService
 from review_engine.llm_connectors.ollama import OllamaConnector
 from review_engine.reports.generator import generate_docx_report, generate_pdf_report
+from review_engine.reviewer import decisions as reviewer_decisions
 
 st.set_page_config(page_title="Local Evidence Review", page_icon="🔎", layout="wide")
 st.title("Local Evidence Review")
@@ -55,6 +56,7 @@ tabs = st.tabs(
         "Run review",
         "Timeline",
         "Findings",
+        "Review",
         "Export report",
         "Audit log",
     ]
@@ -139,6 +141,92 @@ with tabs[4]:
                 st.markdown(f"- {source['citation']}")
 
 with tabs[5]:
+    st.caption(
+        "Human reviewer workspace — synthetic/local data only. Mark each source "
+        "chunk approve / reject / needs-changes and add a note. Decisions are saved "
+        "to this Task's workspace and are consumed by the branded report generator."
+    )
+    review_findings = svc.db.get_findings(matter_id)
+    review_chunks = svc.db.get_chunks(matter_id)
+
+    # Collect the reviewable source chunks (SRC IDs), keyed by chunk id. Chunks
+    # cited by a finding carry the finding context; optionally include every
+    # indexed chunk so nothing is unreachable for review.
+    src_meta: dict[str, dict] = {}
+    for finding in review_findings:
+        for source in finding.get("supporting_sources", []):
+            sid = source.get("source_ref")
+            if not sid:
+                continue
+            meta = src_meta.setdefault(
+                sid, {"citation": source.get("citation", sid), "findings": []}
+            )
+            meta["findings"].append(f"{finding['category']} · {finding['title']}")
+
+    include_all = st.checkbox(
+        "Include all indexed source chunks (not only those cited by findings)",
+        value=not review_findings,
+    )
+    if include_all:
+        for chunk in review_chunks:
+            src_meta.setdefault(chunk.source_ref, {"citation": chunk.citation, "findings": []})
+
+    src_ids = sorted(src_meta)
+    store = reviewer_decisions.load_decisions(matter_id)
+    counts = reviewer_decisions.summary_counts(store, src_ids)
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Approved", counts["approved"])
+    c2.metric("Rejected", counts["rejected"])
+    c3.metric("Needs changes", counts["needs_changes"])
+    c4.metric("Undecided", counts["undecided"])
+    c5.metric("Total chunks", counts["total"])
+
+    if not src_ids:
+        st.info(
+            "No source chunks to review yet. Upload documents, process the Task, "
+            "and run a review (or tick the box above once chunks are indexed)."
+        )
+    else:
+        status_options = list(reviewer_decisions.VALID_STATUSES)
+        status_labels = {
+            "approved": "✅ Approved",
+            "rejected": "❌ Rejected",
+            "needs_changes": "✏️ Needs changes",
+            "undecided": "⏳ Undecided",
+        }
+        reviewer = st.text_input("Reviewer", value="reviewer", key="review_reviewer")
+        with st.form("reviewer_decisions_form"):
+            pending: dict[str, dict] = {}
+            for sid in src_ids:
+                meta = src_meta[sid]
+                current = reviewer_decisions.get_decision(store, sid)
+                st.markdown(f"**{sid}** — {meta['citation']}")
+                if meta["findings"]:
+                    st.caption("Cited by: " + "; ".join(sorted(set(meta["findings"]))))
+                col_status, col_note = st.columns([1, 2])
+                status = col_status.selectbox(
+                    "Decision",
+                    status_options,
+                    index=status_options.index(current["status"]),
+                    format_func=lambda s: status_labels[s],
+                    key=f"status_{sid}",
+                )
+                note = col_note.text_area(
+                    "Note",
+                    value=current["note"],
+                    key=f"note_{sid}",
+                    height=68,
+                )
+                pending[sid] = {"status": status, "note": note}
+                st.divider()
+            if st.form_submit_button("Save decisions", type="primary"):
+                reviewer_decisions.save_decisions(matter_id, pending, reviewer=reviewer)
+                svc.db.log("reviewer_decisions_saved", matter_id, f"{len(pending)} chunk decisions")
+                st.success("Decisions saved to this Task's workspace.")
+                st.rerun()
+
+with tabs[6]:
     findings = svc.db.get_findings(matter_id)
     summary = None
     ollama_enabled = st.checkbox("Use local Ollama to draft the executive summary", value=False)
@@ -171,6 +259,6 @@ with tabs[5]:
         ):
             svc.db.log("report_generated", matter_id, "PDF")
 
-with tabs[6]:
+with tabs[7]:
     logs = svc.db.get_audit_log(matter_id)
     st.dataframe(logs, use_container_width=True, hide_index=True)
