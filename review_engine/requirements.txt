@@ -9,4 +9,9 @@ scikit-learn>=1.4,<2
 reportlab>=4,<5
 python-dateutil>=2.9,<3
 numpy>=1.26,<3
+# RAYAAAA-230 OCR (local Tesseract only). The tesseract binary is installed via
+# apt in the Dockerfile; pytesseract is just the Python wrapper. Pillow renders
+# and decodes page/image bitmaps for OCR.
+pytesseract>=0.3.10,<0.4
+Pillow>=10,<13
 pytest>=8,<9

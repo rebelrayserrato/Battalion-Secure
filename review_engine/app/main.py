@@ -63,7 +63,7 @@ tabs = st.tabs(
 with tabs[0]:
     uploads = st.file_uploader(
         "Upload original documents",
-        type=["pdf", "docx", "txt", "csv", "xlsx"],
+        type=["pdf", "docx", "txt", "csv", "xlsx", "png", "jpg", "jpeg", "zip"],
         accept_multiple_files=True,
         help="Files stay under this local matter workspace and are not sent for model training.",
     )

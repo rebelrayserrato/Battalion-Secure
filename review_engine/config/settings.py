@@ -1,4 +1,23 @@
+import os
 from pathlib import Path
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data"
@@ -9,10 +28,26 @@ INDEXES_DIR = DATA_DIR / "indexes"
 SAMPLES_DIR = DATA_DIR / "samples"
 DATABASE_PATH = DATA_DIR / "review_engine.sqlite3"
 
-SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt", ".csv", ".xlsx"}
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
+# RAYAAAA-230: OCR (scanned PDFs + standalone images) and safe ZIP ingestion.
+# PDF/DOCX/TXT/CSV/XLSX handling is unchanged; these are additive.
+SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt", ".csv", ".xlsx", ".zip"} | IMAGE_EXTENSIONS
 CHUNK_SIZE = 1200
 CHUNK_OVERLAP = 150
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+
+# --- OCR (local Tesseract only — no cloud OCR, no egress) -------------------
+# OCR is a *fallback*: it runs for standalone images and for PDF pages whose
+# native text layer yields fewer than OCR_MIN_NATIVE_CHARS characters.
+OCR_ENABLED = _env_flag("REVIEW_ENGINE_OCR_ENABLED", True)
+OCR_LANG = os.getenv("REVIEW_ENGINE_OCR_LANG", "eng")
+OCR_DPI = _env_int("REVIEW_ENGINE_OCR_DPI", 200)
+OCR_MIN_NATIVE_CHARS = _env_int("REVIEW_ENGINE_OCR_MIN_NATIVE_CHARS", 40)
+
+# --- ZIP ingestion safety guards (zip-bomb / traversal defence) ------------
+ZIP_MAX_FILES = _env_int("REVIEW_ENGINE_ZIP_MAX_FILES", 512)
+ZIP_MAX_TOTAL_BYTES = _env_int("REVIEW_ENGINE_ZIP_MAX_TOTAL_BYTES", 512 * 1024 * 1024)
+ZIP_MAX_RATIO = _env_int("REVIEW_ENGINE_ZIP_MAX_RATIO", 100)
 
 
 def ensure_directories() -> None:
