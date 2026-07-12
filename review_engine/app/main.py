@@ -4,6 +4,7 @@ import streamlit as st
 
 from review_engine.app.services import ReviewService
 from review_engine.llm_connectors.ollama import OllamaConnector
+from review_engine.reports.decisions import default_decisions_path, load_decisions
 from review_engine.reports.generator import generate_docx_report, generate_pdf_report
 
 st.set_page_config(page_title="Local Evidence Review", page_icon="🔎", layout="wide")
@@ -156,16 +157,21 @@ with tabs[5]:
             value=st.session_state.get("ollama_summary", ""),
             height=180,
         ) or None
+    # Reviewer decisions (P3a / RAYAAAA-238) are read from the conventional path
+    # beside the review DB; the report degrades gracefully when none exist.
+    decisions = load_decisions(default_decisions_path(svc.db.path, matter_id), matter_id)
+    if decisions:
+        st.caption(f"Including {len(decisions)} reviewer decision(s) in the report.")
     col1, col2 = st.columns(2)
     with col1:
-        docx = generate_docx_report(svc.db, matter_id, executive_summary=summary)
+        docx = generate_docx_report(svc.db, matter_id, executive_summary=summary, decisions=decisions)
         if st.download_button(
             "Download DOCX report", docx, f"{matter_id}_review_report.docx",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         ):
             svc.db.log("report_generated", matter_id, "DOCX")
     with col2:
-        pdf = generate_pdf_report(svc.db, matter_id, executive_summary=summary)
+        pdf = generate_pdf_report(svc.db, matter_id, executive_summary=summary, decisions=decisions)
         if st.download_button(
             "Download PDF report", pdf, f"{matter_id}_review_report.pdf", "application/pdf"
         ):
