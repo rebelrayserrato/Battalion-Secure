@@ -1,0 +1,2 @@
+# RAYAAAA-210: runtime sqlite/uploads/indexes — never commit engine data.
+data/

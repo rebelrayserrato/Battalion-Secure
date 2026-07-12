@@ -1,0 +1,44 @@
+# Streamlit config for the internal-only, auth-gated deploy (RAYAAAA-194).
+# Env vars in the Dockerfile take precedence; this file documents intent and
+# covers a bare `streamlit run` outside the container.
+[server]
+headless = true
+address = "0.0.0.0"          # container-internal only; never published to host
+port = 8501
+baseUrlPath = "admin/review-engine"
+enableCORS = false
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false     # no telemetry egress
+
+# RAYAAAA-227: brand the Review Engine so it reads as part of rayserrsolutions.com
+# instead of a stock Streamlit app. Palette lifted verbatim from the admin panel's
+# admin.css (AdminShell.tsx): --navy #1b2f5b sidebar, --bg #f7f8fc content, gold
+# accent #c8922a, --text #1a1f2e. This file is copied to /app/.streamlit in the
+# Dockerfile so Streamlit (CWD=/app) actually reads it; env vars only cover the
+# [server] keys above.
+[theme]
+base = "light"
+primaryColor = "#1b2f5b"             # navy — matches the site's primary CTAs
+backgroundColor = "#f7f8fc"          # admin.css --bg (content area)
+secondaryBackgroundColor = "#ffffff" # admin.css --bg-alt (cards / widgets)
+textColor = "#1a1f2e"                # admin.css --text
+linkColor = "#2e7d9f"                # admin.css --accent
+font = "sans serif"
+
+[theme.sidebar]
+backgroundColor = "#1b2f5b"          # navy sidebar, mirrors AdminShell .adm-sidebar
+secondaryBackgroundColor = "#2a4580" # admin.css --navy-light (sidebar widgets)
+textColor = "#ffffff"
+primaryColor = "#c8922a"             # gold accent, mirrors the active-nav indicator
+
+[client]
+# Hide Streamlit's dev/hamburger toolbar so the RAYSERR brand isn't sharing the
+# chrome with Streamlit's own (RAYAAAA-227). "minimal" keeps only essentials.
+toolbarMode = "minimal"
+
+[global]
+# Findings are risk INDICATORS to guide human review — not legal/fraud
+# determinations (RAYAAAA-192 AC4). Framing preserved in-app and portal-side.
+showWarningOnDirectExecution = false

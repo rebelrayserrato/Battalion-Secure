@@ -14,4 +14,10 @@ numpy>=1.26,<3
 # and decodes page/image bitmaps for OCR.
 pytesseract>=0.3.10,<0.4
 Pillow>=10,<13
+# RAYAAAA-210 matter-API sidecar (internal, auth-gated). Minimal — the API only
+# creates matter shells via the existing sqlite store. httpx powers FastAPI's
+# TestClient for the sidecar tests.
+fastapi>=0.111,<1
+uvicorn>=0.30,<1
+httpx>=0.27,<1
 pytest>=8,<9
