@@ -3,6 +3,7 @@ from __future__ import annotations
 import streamlit as st
 
 from review_engine.app.services import ReviewService
+from review_engine.dashboard.view import render_dashboard
 from review_engine.llm_connectors.ollama import OllamaConnector
 from review_engine.reports.generator import generate_docx_report, generate_pdf_report
 
@@ -21,6 +22,11 @@ def service() -> ReviewService:
 
 svc = service()
 with st.sidebar:
+    view_mode = st.radio(
+        "View",
+        ["Task workspace", "Cross-Task risk dashboard"],
+        help="The workspace reviews one Task; the dashboard aggregates risk across all Tasks.",
+    )
     st.header("Matter workspace")
     matters = svc.db.list_matters()
     labels = {f"{m['name']} · {m['id']}": m["id"] for m in matters}
@@ -38,6 +44,10 @@ with st.sidebar:
                     st.rerun()
                 else:
                     st.error("Matter name is required.")
+
+if view_mode == "Cross-Task risk dashboard":
+    render_dashboard(svc)
+    st.stop()
 
 if not matter_id:
     st.info("Create or select a matter to begin.")
