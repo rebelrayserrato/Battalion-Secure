@@ -24,6 +24,10 @@ Only SRC IDs the reviewer has touched are stored. Any SRC ID absent from the
 map is treated as ``undecided`` with an empty note (see :func:`get_decision`).
 If the schema must change, comment on RAYAAAA-235 so LeadEng (P3b) can sync.
 
+Decisions are stored at ``<data dir>/reviewer_decisions/<task_id>.json`` — the
+same location the P3b report generator reads from — so the two integrate with
+no extra configuration.
+
 Everything here is local, offline-safe, and never makes an external call.
 """
 
@@ -36,9 +40,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Mapping, Optional
 
-from review_engine.config.settings import MATTERS_DIR
+from review_engine.config.settings import DATA_DIR
 
-DECISIONS_FILENAME = "reviewer_decisions.json"
+# Per-Task decisions live at ``<data dir>/reviewer_decisions/<task_id>.json``.
+# This is the exact location the P3b report generator reads from
+# (``review_engine/reports/decisions.py::default_decisions_path``), so the
+# workspace and the report generator agree with no extra wiring.
+DECISIONS_SUBDIR = "reviewer_decisions"
 
 VALID_STATUSES = ("approved", "rejected", "needs_changes", "undecided")
 DEFAULT_STATUS = "undecided"
@@ -51,15 +59,15 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
-def decisions_dir(matter_id: str, base: Optional[Path] = None) -> Path:
-    """Return the per-Task workspace directory holding reviewer decisions."""
-    root = Path(base) if base is not None else MATTERS_DIR
-    return root / matter_id
+def decisions_dir(base: Optional[Path] = None) -> Path:
+    """Return the directory holding per-Task reviewer-decision files."""
+    root = Path(base) if base is not None else DATA_DIR
+    return root / DECISIONS_SUBDIR
 
 
 def decisions_path(matter_id: str, base: Optional[Path] = None) -> Path:
-    """Return the path to a Task's ``reviewer_decisions.json`` file."""
-    return decisions_dir(matter_id, base) / DECISIONS_FILENAME
+    """Return the path to a Task's ``<task_id>.json`` decisions file."""
+    return decisions_dir(base) / f"{matter_id}.json"
 
 
 def empty_store(matter_id: str) -> dict:
@@ -107,9 +115,9 @@ def load_decisions(matter_id: str, base: Optional[Path] = None) -> dict:
 
 def _write_store(matter_id: str, store: dict, base: Optional[Path]) -> Path:
     """Atomically write ``store`` to the Task's decisions file."""
-    directory = decisions_dir(matter_id, base)
+    directory = decisions_dir(base)
     directory.mkdir(parents=True, exist_ok=True)
-    path = directory / DECISIONS_FILENAME
+    path = directory / f"{matter_id}.json"
     fd, tmp_name = tempfile.mkstemp(dir=str(directory), prefix=".reviewer_", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:

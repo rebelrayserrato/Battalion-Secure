@@ -11,8 +11,12 @@ gate stands).
 
 ## Storage location
 
-Per-Task file: `review_engine/data/matters/<task_id>/reviewer_decisions.json`
+Per-Task file: `review_engine/data/reviewer_decisions/<task_id>.json`
 (computed by `decisions.decisions_path(task_id)`).
+
+This is deliberately the same path the P3b report generator reads from
+(`review_engine/reports/decisions.py::default_decisions_path`), so the reviewer
+workspace and the report generator agree with no extra wiring.
 
 ## Interface contract for P3b (do not change without syncing on RAYAAAA-235)
 

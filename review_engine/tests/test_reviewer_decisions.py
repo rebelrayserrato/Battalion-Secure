@@ -137,3 +137,38 @@ def test_summary_counts_empty_task():
     assert counts["total"] == 0
     assert counts["decided"] == 0
     assert all(counts[s] == 0 for s in d.VALID_STATUSES)
+
+
+def test_default_path_matches_p3b_reader(tmp_path):
+    """P3a must write exactly where the P3b report generator reads (AC5).
+
+    Skips until the P3b module is present (they integrate at RAYAAAA-235); once
+    both branches are merged this actively guards the shared path.
+    """
+    p3b = pytest.importorskip("review_engine.reports.decisions")
+
+    db_path = tmp_path / "review_engine.sqlite3"
+    p3a_path = d.decisions_path("MAT-INT", base=tmp_path)
+    p3b_path = p3b.default_decisions_path(db_path, "MAT-INT")
+    assert p3a_path == p3b_path
+
+
+def test_p3b_reads_p3a_output(tmp_path):
+    """End-to-end schema handshake: write with P3a, read back with P3b."""
+    p3b = pytest.importorskip("review_engine.reports.decisions")
+
+    d.save_decisions(
+        "MAT-INT",
+        {
+            "SRC-A": {"status": "approved", "note": "ok"},
+            "SRC-B": {"status": "needs_changes", "note": "clarify"},
+        },
+        reviewer="alice",
+        base=tmp_path,
+    )
+    loaded = p3b.load_decisions(d.decisions_path("MAT-INT", base=tmp_path), matter_id="MAT-INT")
+    assert loaded["SRC-A"]["status"] == "approved"
+    assert loaded["SRC-A"]["note"] == "ok"
+    assert loaded["SRC-A"]["reviewer"] == "alice"
+    # P3b canonicalises needs_changes -> needs-changes
+    assert loaded["SRC-B"]["status"] == "needs-changes"
