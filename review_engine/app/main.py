@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import streamlit as st
 
+from review_engine.app.policy_audit import PolicyAuditor
+from review_engine.app.retrieval import GroundedAnswerer
 from review_engine.app.services import ReviewService
 from review_engine.llm_connectors.ollama import OllamaConnector
 from review_engine.privacy.erasure import erase_matter
@@ -125,6 +127,8 @@ tabs = st.tabs(
         "Findings",
         "Export report",
         "Audit log",
+        "Chat",
+        "Policy audit",
     ]
 )
 
@@ -242,3 +246,54 @@ with tabs[5]:
 with tabs[6]:
     logs = svc.db.get_audit_log(matter_id)
     st.dataframe(logs, use_container_width=True, hide_index=True)
+
+with tabs[7]:
+    # RAYAAAA-232 (P2a): grounded RAG chat. Answers ONLY from this Task's
+    # indexed evidence; local model only; degrades to raw passages offline.
+    st.caption(
+        "Ask a question about this Task's documents. Answers are drawn only "
+        "from the local evidence index and cite source references. Requires "
+        "human review."
+    )
+    question = st.text_input(
+        "Your question", key="chat_question",
+        placeholder="What are the termination terms? Is there a liability cap?",
+    )
+    if st.button("Ask", key="chat_ask", disabled=not question.strip()):
+        with st.spinner("Retrieving evidence and drafting a grounded answer…"):
+            result = GroundedAnswerer().answer(matter_id, question)
+        st.write(result["answer"])
+        if result["sources"]:
+            st.write("Sources:")
+            for source in result["sources"]:
+                st.markdown(f"- {source['citation']}")
+        if not result["model_used"]:
+            st.info("Local model unavailable — showed retrieved passages only.")
+
+with tabs[8]:
+    # RAYAAAA-233 (P2b): policy-audit / before-you-sign. Templated review over
+    # the same retrieval; reuses the findings/source-reference model.
+    st.caption(
+        "\"Before you sign\": screens this Task's documents against a checklist "
+        "for unusual/risky clauses and missing protections. Evidence-bound, "
+        "local-only, and a screening aid — requires human review."
+    )
+    if st.button("Run before-you-sign review", type="primary", key="policy_audit_run"):
+        with st.spinner("Screening retrieved clauses against the checklist…"):
+            audit_findings = PolicyAuditor().audit(matter_id)
+        st.session_state["policy_audit_findings"] = audit_findings
+    audit_findings = st.session_state.get("policy_audit_findings")
+    if audit_findings is None:
+        st.info("Process the Task's documents, then run the review.")
+    elif not audit_findings:
+        st.success("No risky clauses or missing protections were flagged. Human review still required.")
+    else:
+        st.warning(f"{len(audit_findings)} item(s) to review before signing.")
+        for finding in audit_findings:
+            with st.expander(f"{finding['category']} · {finding['title']} · {finding['confidence']}"):
+                st.write(finding["explanation"])
+                st.caption(f"Confidence basis: {finding['confidence_reason']}")
+                if finding["supporting_sources"]:
+                    st.write("Sources:")
+                    for source in finding["supporting_sources"]:
+                        st.markdown(f"- {source['citation']}")

@@ -17,6 +17,20 @@ class OllamaConnector:
         except (OSError, URLError):
             return False
 
+    def generate(self, prompt: str, timeout: int = 120) -> str:
+        """Single grounded completion from the local model (no streaming)."""
+        payload = json.dumps(
+            {"model": self.model, "prompt": prompt, "stream": False}
+        ).encode("utf-8")
+        request = Request(
+            f"{self.base_url}/api/generate",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8"))["response"].strip()
+
     def summarize_findings(self, findings: list[dict], purpose: str = "executive summary") -> str:
         if not findings:
             return "No source-supported findings are available to summarize."
