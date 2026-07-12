@@ -57,6 +57,7 @@ tabs = st.tabs(
         "Findings",
         "Export report",
         "Audit log",
+        "Compare",
     ]
 )
 
@@ -174,3 +175,84 @@ with tabs[5]:
 with tabs[6]:
     logs = svc.db.get_audit_log(matter_id)
     st.dataframe(logs, use_container_width=True, hide_index=True)
+
+with tabs[7]:
+    # RAYAAAA-231 (P1b): deterministic document compare / redline between two
+    # processed documents (or two versions) in this matter. The diff itself is
+    # local + model-free (difflib over the existing SourceChunk model); the
+    # optional plain-language summary reuses the bounded local-Ollama connector
+    # and degrades gracefully when it is unavailable. No egress.
+    st.caption(
+        "Redline two processed documents in this matter: added, removed, and "
+        "changed segments, each anchored to a source reference. Deterministic "
+        "and local; requires human review."
+    )
+    processed_docs = [
+        item["name"]
+        for item in svc.db.list_documents(matter_id)
+        if item["processed_at"]
+    ]
+    if len(processed_docs) < 2:
+        st.info(
+            "Upload and process at least two documents (or two versions) to "
+            "compare them."
+        )
+    else:
+        base_name = st.selectbox("Base version (earlier)", processed_docs, key="compare_base")
+        default_compare = 1 if processed_docs[1] != base_name else 0
+        compare_options = [name for name in processed_docs if name != base_name]
+        compare_name = st.selectbox("Compared version (later)", compare_options, key="compare_target")
+        show_unchanged = st.checkbox("Show unchanged segments", value=False, key="compare_unchanged")
+        use_ollama = st.checkbox(
+            "Draft a plain-language summary with local Ollama", value=False, key="compare_ollama"
+        )
+        if st.button("Compare documents", type="primary", key="compare_run"):
+            with st.spinner("Diffing documents locally…"):
+                comparison = svc.compare_documents(
+                    matter_id, base_name, compare_name, include_unchanged=show_unchanged
+                )
+            counts = comparison.counts
+            if not comparison.has_changes:
+                st.success("No differences found between the two versions.")
+            else:
+                st.warning(
+                    f"{counts['added']} added · {counts['removed']} removed · "
+                    f"{counts['changed']} changed segment(s). Requires human review."
+                )
+            if use_ollama:
+                from review_engine.compare.redline import summarize_comparison
+
+                connector = OllamaConnector()
+                with st.spinner("Drafting a grounded summary of the diff…"):
+                    summary = summarize_comparison(comparison, connector)
+                st.markdown("**Summary of changes**")
+                st.write(summary)
+                if not connector.available():
+                    st.info("Local model unavailable — showed the deterministic summary.")
+
+            _badge = {
+                "added": (":green[ADDED]", "compare_source_refs", "compare_text"),
+                "removed": (":red[REMOVED]", "base_source_refs", "base_text"),
+                "changed": (":orange[CHANGED]", "compare_source_refs", None),
+                "unchanged": (":gray[UNCHANGED]", "compare_source_refs", "compare_text"),
+            }
+            for segment in comparison.segments:
+                label, ref_attr, _text_attr = _badge[segment.kind]
+                refs = getattr(segment, ref_attr) or segment.base_source_refs
+                header = f"{label} · {', '.join(refs) if refs else 'no source ref'}"
+                with st.expander(header):
+                    if segment.kind == "changed":
+                        st.markdown(f":red[- {segment.base_text}]")
+                        st.markdown(f":green[+ {segment.compare_text}]")
+                        st.caption(
+                            "Base: "
+                            + (", ".join(segment.base_citations) or "—")
+                            + "  →  Compared: "
+                            + (", ".join(segment.compare_citations) or "—")
+                        )
+                    elif segment.kind == "removed":
+                        st.markdown(f":red[- {segment.base_text}]")
+                        st.caption("Base: " + (", ".join(segment.base_citations) or "—"))
+                    else:  # added / unchanged
+                        st.markdown(f":green[+ {segment.compare_text}]")
+                        st.caption("Compared: " + (", ".join(segment.compare_citations) or "—"))

@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 
 from review_engine.audits.database import ReviewDatabase
+from review_engine.compare.redline import ComparisonResult, compare_documents
 from review_engine.config.settings import SUPPORTED_EXTENSIONS, UPLOADS_DIR, ensure_directories
 from review_engine.evidence.contradictions import detect_contradictions
 from review_engine.evidence.entities import extract_entities
@@ -88,3 +89,38 @@ class ReviewService:
 
     def search(self, matter_id: str, query: str, limit: int = 8) -> list[dict]:
         return EvidenceIndex(matter_id).search(query, limit)
+
+    def document_chunks(self, matter_id: str, document_name: str) -> list:
+        """Processed chunks for a single document, in reading order.
+
+        Reuses the existing chunk store (RAYAAAA-231): ``get_chunks`` already
+        orders by document, page, then row, so this preserves document order.
+        """
+        return [
+            chunk
+            for chunk in self.db.get_chunks(matter_id)
+            if chunk.document_name == document_name
+        ]
+
+    def compare_documents(
+        self,
+        matter_id: str,
+        base_name: str,
+        compare_name: str,
+        *,
+        include_unchanged: bool = False,
+    ) -> ComparisonResult:
+        """Deterministic redline between two processed documents in a Task."""
+        result = compare_documents(
+            base_name,
+            self.document_chunks(matter_id, base_name),
+            compare_name,
+            self.document_chunks(matter_id, compare_name),
+            include_unchanged=include_unchanged,
+        )
+        self.db.log(
+            "document_compare",
+            matter_id,
+            f"{base_name} vs {compare_name}: {result.counts}",
+        )
+        return result
