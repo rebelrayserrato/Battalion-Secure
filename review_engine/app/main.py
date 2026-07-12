@@ -4,6 +4,7 @@ import streamlit as st
 
 from review_engine.app.services import ReviewService
 from review_engine.llm_connectors.ollama import OllamaConnector
+from review_engine.privacy.erasure import erase_matter
 from review_engine.reports.generator import generate_docx_report, generate_pdf_report
 
 st.set_page_config(
@@ -52,30 +53,66 @@ with st.sidebar:
         "← Back to RAYSERR Admin</a>",
         unsafe_allow_html=True,
     )
-    st.header("Matter workspace")
+    notice = st.session_state.pop("_deleted_notice", None)
+    if notice:
+        st.success(notice)
+    st.header("Task workspace")
+    # RAYAAAA-228: show every task as a persistent list in the sidebar (instead
+    # of a dropdown) so the whole workspace is visible at a glance. The radio
+    # keeps the underlying matter id as its value; only the label is "Task".
     matters = svc.db.list_matters()
-    labels = {f"{m['name']} · {m['id']}": m["id"] for m in matters}
-    selection = st.selectbox("Select matter", [""] + list(labels), index=0)
-    matter_id = labels.get(selection)
-    with st.expander("Create a matter", expanded=not matters):
+    name_by_id = {m["id"]: m["name"] for m in matters}
+    if matters:
+        matter_id = st.radio(
+            "Tasks",
+            options=[m["id"] for m in matters],
+            format_func=lambda mid: name_by_id.get(mid, mid),
+            index=0,
+        )
+    else:
+        matter_id = None
+        st.caption("No tasks yet — create one below.")
+    with st.expander("Create a task", expanded=not matters):
+        # RAYAAAA-228: creation needs a name only. Description/jurisdiction still
+        # default to empty in create_matter and can be added later; the owner's
+        # ask is that starting a task requires nothing but a name.
         with st.form("create_matter"):
-            name = st.text_input("Matter name")
-            description = st.text_area("Description")
-            jurisdiction = st.text_input("Jurisdiction (optional)")
-            if st.form_submit_button("Create matter", type="primary"):
+            name = st.text_input("Task name")
+            if st.form_submit_button("Create task", type="primary"):
                 if name.strip():
-                    created = svc.db.create_matter(name, description, jurisdiction)
-                    st.success(f"Created {created}. Select it above.")
+                    created = svc.db.create_matter(name)
+                    st.success(f"Created {created}.")
                     st.rerun()
                 else:
-                    st.error("Matter name is required.")
+                    st.error("Task name is required.")
 
 if not matter_id:
-    st.info("Create or select a matter to begin.")
+    st.info("Create or select a task to begin.")
     st.stop()
 
 matter = svc.db.get_matter(matter_id)
-st.subheader(f"{matter['name']} · {matter_id}")
+header_col, delete_col = st.columns([5, 1])
+with header_col:
+    st.subheader(f"{matter['name']} · {matter_id}")
+with delete_col:
+    # RAYAAAA-228: owner-initiated in-process deletion of a task. This calls
+    # erase_matter directly (NOT the HTTP fan-out endpoint, which is for the
+    # main-app client-erasure flow) — it removes the matters row plus all child
+    # rows, uploads, index, and any report bytes (RAYAAAA-196, verified 0/0/0).
+    # Streamlit has no native confirm dialog, so require an explicit checkbox
+    # before the delete button activates.
+    confirm = st.checkbox("Confirm delete", key=f"confirm_delete_{matter_id}")
+    if st.button("Delete task", type="primary", disabled=not confirm):
+        report = erase_matter(matter_id, svc.db.path)
+        # Log at system level (matter_id=None) so the record survives the erase.
+        svc.db.log("matter_deleted", None, f"{matter['name']} ({matter_id})")
+        if report.clean:
+            st.session_state["_deleted_notice"] = f"Deleted task {matter['name']}."
+        else:
+            st.session_state["_deleted_notice"] = (
+                f"Deleted task {matter['name']} with residual: {report.residual_summary()}"
+            )
+        st.rerun()
 if not matter.get("jurisdiction"):
     st.warning("Jurisdiction required for jurisdiction-dependent legal review.")
 
@@ -96,7 +133,7 @@ with tabs[0]:
         "Upload original documents",
         type=["pdf", "docx", "txt", "csv", "xlsx"],
         accept_multiple_files=True,
-        help="Files stay under this local matter workspace and are not sent for model training.",
+        help="Files stay under this local task workspace and are not sent for model training.",
     )
     if st.button("Save uploaded files", disabled=not uploads):
         for uploaded in uploads:
