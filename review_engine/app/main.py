@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import streamlit as st
 
+from review_engine.app.rag_chat import RagChatService
 from review_engine.app.services import ReviewService
 from review_engine.llm_connectors.ollama import OllamaConnector
 from review_engine.privacy.erasure import erase_matter
@@ -120,6 +121,7 @@ tabs = st.tabs(
     [
         "Documents",
         "Search evidence",
+        "Chat",
         "Run review",
         "Timeline",
         "Findings",
@@ -180,6 +182,52 @@ with tabs[1]:
             st.error(f"Search index unavailable: {exc}. Process the documents first.")
 
 with tabs[2]:
+    # RAYAAAA-232: grounded RAG chat. The answer is retrieval-augmented over this
+    # Task's local Chroma index and cites source-reference IDs. Same guardrails as
+    # the summarizer: answers come ONLY from retrieved chunks, no new facts / legal
+    # conclusions, and it degrades gracefully when Ollama is unavailable (verbatim
+    # source excerpts instead). All inference is local — no external API / egress.
+    st.caption(
+        "Answers are drawn only from this Task's processed documents and cite "
+        "source-reference IDs. Not legal advice — human review is required."
+    )
+    chat_ollama = st.checkbox(
+        "Use local Ollama to draft the answer", value=False, key="chat_use_ollama",
+        help="Unchecked (or if Ollama is offline) shows the most relevant source excerpts verbatim.",
+    )
+    chat_model = (
+        st.text_input("Ollama model", value="llama3.2", key="chat_model")
+        if chat_ollama
+        else None
+    )
+    chat_k = st.slider("Passages to retrieve", 1, 12, 6, key="chat_top_k")
+    question = st.text_input(
+        "Ask a question about this Task's documents",
+        placeholder="What date was the contract terminated? Who approved invoice 1042?",
+        key="chat_question",
+    )
+    if st.button("Ask", type="primary", disabled=not question.strip()):
+        connector = OllamaConnector(model=chat_model) if chat_ollama else None
+        try:
+            chat_service = RagChatService.for_matter(matter_id, connector=connector)
+            with st.spinner("Retrieving grounded evidence…"):
+                result = chat_service.answer(question, limit=chat_k)
+            svc.db.log("chat_query", matter_id, f"{len(result.sources)} source(s); model={result.model_used}")
+            if result.notice:
+                st.info(result.notice)
+            if not result.grounded:
+                st.warning(result.text)
+            else:
+                st.markdown(result.text)
+                st.caption("Cited sources:")
+                for source in result.sources:
+                    with st.expander(source.citation):
+                        st.write(source.text)
+                        st.caption(f"Source: {source.source_ref}")
+        except Exception as exc:
+            st.error(f"Chat unavailable: {exc}. Process the documents first.")
+
+with tabs[3]:
     include_hr = st.checkbox("HR / legal risk review", value=True)
     include_fraud = st.checkbox("Potential fraud indicator review", value=True)
     st.caption("Rules and anomaly scores identify review flags, not legal conclusions or proof of fraud.")
@@ -187,14 +235,14 @@ with tabs[2]:
         findings = svc.run_reviews(matter_id, include_hr, include_fraud)
         st.success(f"Review complete: {len(findings)} source-supported finding(s).")
 
-with tabs[3]:
+with tabs[4]:
     timeline = svc.timeline(matter_id)
     if timeline:
         st.dataframe(timeline, use_container_width=True, hide_index=True)
     else:
         st.info("No dated events identified in processed evidence.")
 
-with tabs[4]:
+with tabs[5]:
     findings = svc.db.get_findings(matter_id)
     if not findings:
         st.info("No source-supported findings. Process documents and run a review.")
@@ -206,7 +254,7 @@ with tabs[4]:
             for source in finding["supporting_sources"]:
                 st.markdown(f"- {source['citation']}")
 
-with tabs[5]:
+with tabs[6]:
     findings = svc.db.get_findings(matter_id)
     summary = None
     ollama_enabled = st.checkbox("Use local Ollama to draft the executive summary", value=False)
@@ -239,6 +287,6 @@ with tabs[5]:
         ):
             svc.db.log("report_generated", matter_id, "PDF")
 
-with tabs[6]:
+with tabs[7]:
     logs = svc.db.get_audit_log(matter_id)
     st.dataframe(logs, use_container_width=True, hide_index=True)
