@@ -16,9 +16,11 @@
 FROM python:3.12-slim AS base
 
 # Build deps for PyMuPDF / reportlab / sentence-transformers wheels. curl is kept
-# in the final image only for the container healthcheck.
+# in the final image only for the container healthcheck. tesseract-ocr is the
+# runtime OCR engine for RAYAAAA-230 (pytesseract is only the Python wrapper).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential libglib2.0-0 libgl1 curl \
+        tesseract-ocr tesseract-ocr-eng \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
