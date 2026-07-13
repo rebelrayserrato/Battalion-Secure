@@ -53,6 +53,20 @@ class OllamaConnector:
         except (OSError, URLError):
             return False
 
+    def generate(self, prompt: str, timeout: int = 120) -> str:
+        """Single grounded completion from the local model (no streaming)."""
+        payload = json.dumps(
+            {"model": self.model, "prompt": prompt, "stream": False}
+        ).encode("utf-8")
+        request = Request(
+            f"{self.base_url}/api/generate",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8"))["response"].strip()
+
     def answer_from_context(self, question: str, contexts: list[dict]) -> str:
         """Answer a question using ONLY the retrieved passages (RAYAAAA-232 RAG chat).
 
@@ -64,17 +78,7 @@ class OllamaConnector:
         if not contexts:
             return GROUNDED_NO_CONTEXT
         prompt = build_grounded_prompt(question, contexts)
-        payload = json.dumps(
-            {"model": self.model, "prompt": prompt, "stream": False}
-        ).encode("utf-8")
-        request = Request(
-            f"{self.base_url}/api/generate",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urlopen(request, timeout=120) as response:
-            return json.loads(response.read().decode("utf-8"))["response"].strip()
+        return self.generate(prompt)
 
     def summarize_findings(self, findings: list[dict], purpose: str = "executive summary") -> str:
         if not findings:

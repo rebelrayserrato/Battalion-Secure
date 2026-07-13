@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import streamlit as st
 
-from review_engine.app.rag_chat import RagChatService
+from review_engine.app.policy_audit import PolicyAuditor
+from review_engine.app.retrieval import GroundedAnswerer
 from review_engine.app.services import ReviewService
 from review_engine.llm_connectors.ollama import OllamaConnector
 from review_engine.privacy.erasure import erase_matter
 from review_engine.reports.generator import generate_docx_report, generate_pdf_report
+from review_engine.dashboard.view import render_dashboard
+from review_engine.reports.decisions import default_decisions_path, load_decisions
+from review_engine.reviewer import decisions as reviewer_decisions
 
 st.set_page_config(
     page_title="Review Engine · RAYSERR Solutions",
@@ -57,6 +61,11 @@ with st.sidebar:
     notice = st.session_state.pop("_deleted_notice", None)
     if notice:
         st.success(notice)
+    view_mode = st.radio(
+        "View",
+        ["Task workspace", "Cross-Task risk dashboard"],
+        help="The workspace reviews one Task; the dashboard aggregates risk across all Tasks.",
+    )
     st.header("Task workspace")
     # RAYAAAA-228: show every task as a persistent list in the sidebar (instead
     # of a dropdown) so the whole workspace is visible at a glance. The radio
@@ -86,6 +95,10 @@ with st.sidebar:
                     st.rerun()
                 else:
                     st.error("Task name is required.")
+
+if view_mode == "Cross-Task risk dashboard":
+    render_dashboard(svc)
+    st.stop()
 
 if not matter_id:
     st.info("Create or select a task to begin.")
@@ -121,13 +134,15 @@ tabs = st.tabs(
     [
         "Documents",
         "Search evidence",
-        "Chat",
         "Run review",
         "Timeline",
         "Findings",
         "Export report",
         "Audit log",
+        "Chat",
+        "Policy audit",
         "Compare",
+        "Review",
     ]
 )
 
@@ -183,52 +198,6 @@ with tabs[1]:
             st.error(f"Search index unavailable: {exc}. Process the documents first.")
 
 with tabs[2]:
-    # RAYAAAA-232: grounded RAG chat. The answer is retrieval-augmented over this
-    # Task's local Chroma index and cites source-reference IDs. Same guardrails as
-    # the summarizer: answers come ONLY from retrieved chunks, no new facts / legal
-    # conclusions, and it degrades gracefully when Ollama is unavailable (verbatim
-    # source excerpts instead). All inference is local — no external API / egress.
-    st.caption(
-        "Answers are drawn only from this Task's processed documents and cite "
-        "source-reference IDs. Not legal advice — human review is required."
-    )
-    chat_ollama = st.checkbox(
-        "Use local Ollama to draft the answer", value=False, key="chat_use_ollama",
-        help="Unchecked (or if Ollama is offline) shows the most relevant source excerpts verbatim.",
-    )
-    chat_model = (
-        st.text_input("Ollama model", value="llama3.2", key="chat_model")
-        if chat_ollama
-        else None
-    )
-    chat_k = st.slider("Passages to retrieve", 1, 12, 6, key="chat_top_k")
-    question = st.text_input(
-        "Ask a question about this Task's documents",
-        placeholder="What date was the contract terminated? Who approved invoice 1042?",
-        key="chat_question",
-    )
-    if st.button("Ask", type="primary", disabled=not question.strip()):
-        connector = OllamaConnector(model=chat_model) if chat_ollama else None
-        try:
-            chat_service = RagChatService.for_matter(matter_id, connector=connector)
-            with st.spinner("Retrieving grounded evidence…"):
-                result = chat_service.answer(question, limit=chat_k)
-            svc.db.log("chat_query", matter_id, f"{len(result.sources)} source(s); model={result.model_used}")
-            if result.notice:
-                st.info(result.notice)
-            if not result.grounded:
-                st.warning(result.text)
-            else:
-                st.markdown(result.text)
-                st.caption("Cited sources:")
-                for source in result.sources:
-                    with st.expander(source.citation):
-                        st.write(source.text)
-                        st.caption(f"Source: {source.source_ref}")
-        except Exception as exc:
-            st.error(f"Chat unavailable: {exc}. Process the documents first.")
-
-with tabs[3]:
     include_hr = st.checkbox("HR / legal risk review", value=True)
     include_fraud = st.checkbox("Potential fraud indicator review", value=True)
     st.caption("Rules and anomaly scores identify review flags, not legal conclusions or proof of fraud.")
@@ -236,14 +205,14 @@ with tabs[3]:
         findings = svc.run_reviews(matter_id, include_hr, include_fraud)
         st.success(f"Review complete: {len(findings)} source-supported finding(s).")
 
-with tabs[4]:
+with tabs[3]:
     timeline = svc.timeline(matter_id)
     if timeline:
         st.dataframe(timeline, use_container_width=True, hide_index=True)
     else:
         st.info("No dated events identified in processed evidence.")
 
-with tabs[5]:
+with tabs[4]:
     findings = svc.db.get_findings(matter_id)
     if not findings:
         st.info("No source-supported findings. Process documents and run a review.")
@@ -255,7 +224,7 @@ with tabs[5]:
             for source in finding["supporting_sources"]:
                 st.markdown(f"- {source['citation']}")
 
-with tabs[6]:
+with tabs[5]:
     findings = svc.db.get_findings(matter_id)
     summary = None
     ollama_enabled = st.checkbox("Use local Ollama to draft the executive summary", value=False)
@@ -273,26 +242,80 @@ with tabs[6]:
             value=st.session_state.get("ollama_summary", ""),
             height=180,
         ) or None
+    decisions = load_decisions(default_decisions_path(svc.db.path, matter_id), matter_id)
+    if decisions:
+        st.caption(f"Including {len(decisions)} reviewer decision(s) in the report.")
     col1, col2 = st.columns(2)
     with col1:
-        docx = generate_docx_report(svc.db, matter_id, executive_summary=summary)
+        docx = generate_docx_report(svc.db, matter_id, executive_summary=summary, decisions=decisions)
         if st.download_button(
             "Download DOCX report", docx, f"{matter_id}_review_report.docx",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         ):
             svc.db.log("report_generated", matter_id, "DOCX")
     with col2:
-        pdf = generate_pdf_report(svc.db, matter_id, executive_summary=summary)
+        pdf = generate_pdf_report(svc.db, matter_id, executive_summary=summary, decisions=decisions)
         if st.download_button(
             "Download PDF report", pdf, f"{matter_id}_review_report.pdf", "application/pdf"
         ):
             svc.db.log("report_generated", matter_id, "PDF")
 
-with tabs[7]:
+with tabs[6]:
     logs = svc.db.get_audit_log(matter_id)
     st.dataframe(logs, use_container_width=True, hide_index=True)
 
 with tabs[7]:
+    # RAYAAAA-232 (P2a): grounded RAG chat. Answers ONLY from this Task's
+    # indexed evidence; local model only; degrades to raw passages offline.
+    st.caption(
+        "Ask a question about this Task's documents. Answers are drawn only "
+        "from the local evidence index and cite source references. Requires "
+        "human review."
+    )
+    question = st.text_input(
+        "Your question", key="chat_question",
+        placeholder="What are the termination terms? Is there a liability cap?",
+    )
+    if st.button("Ask", key="chat_ask", disabled=not question.strip()):
+        with st.spinner("Retrieving evidence and drafting a grounded answer…"):
+            result = GroundedAnswerer().answer(matter_id, question)
+        st.write(result["answer"])
+        if result["sources"]:
+            st.write("Sources:")
+            for source in result["sources"]:
+                st.markdown(f"- {source['citation']}")
+        if not result["model_used"]:
+            st.info("Local model unavailable — showed retrieved passages only.")
+
+with tabs[8]:
+    # RAYAAAA-233 (P2b): policy-audit / before-you-sign. Templated review over
+    # the same retrieval; reuses the findings/source-reference model.
+    st.caption(
+        "\"Before you sign\": screens this Task's documents against a checklist "
+        "for unusual/risky clauses and missing protections. Evidence-bound, "
+        "local-only, and a screening aid — requires human review."
+    )
+    if st.button("Run before-you-sign review", type="primary", key="policy_audit_run"):
+        with st.spinner("Screening retrieved clauses against the checklist…"):
+            audit_findings = PolicyAuditor().audit(matter_id)
+        st.session_state["policy_audit_findings"] = audit_findings
+    audit_findings = st.session_state.get("policy_audit_findings")
+    if audit_findings is None:
+        st.info("Process the Task's documents, then run the review.")
+    elif not audit_findings:
+        st.success("No risky clauses or missing protections were flagged. Human review still required.")
+    else:
+        st.warning(f"{len(audit_findings)} item(s) to review before signing.")
+        for finding in audit_findings:
+            with st.expander(f"{finding['category']} · {finding['title']} · {finding['confidence']}"):
+                st.write(finding["explanation"])
+                st.caption(f"Confidence basis: {finding['confidence_reason']}")
+                if finding["supporting_sources"]:
+                    st.write("Sources:")
+                    for source in finding["supporting_sources"]:
+                        st.markdown(f"- {source['citation']}")
+
+with tabs[9]:
     # RAYAAAA-231 (P1b): deterministic document compare / redline between two
     # processed documents (or two versions) in this matter. The diff itself is
     # local + model-free (difflib over the existing SourceChunk model); the
@@ -372,3 +395,89 @@ with tabs[7]:
                     else:  # added / unchanged
                         st.markdown(f":green[+ {segment.compare_text}]")
                         st.caption("Compared: " + (", ".join(segment.compare_citations) or "—"))
+
+with tabs[10]:
+    st.caption(
+        "Human reviewer workspace — synthetic/local data only. Mark each source "
+        "chunk approve / reject / needs-changes and add a note. Decisions are saved "
+        "to this Task's workspace and are consumed by the branded report generator."
+    )
+    review_findings = svc.db.get_findings(matter_id)
+    review_chunks = svc.db.get_chunks(matter_id)
+
+    # Collect the reviewable source chunks (SRC IDs), keyed by chunk id. Chunks
+    # cited by a finding carry the finding context; optionally include every
+    # indexed chunk so nothing is unreachable for review.
+    src_meta: dict[str, dict] = {}
+    for finding in review_findings:
+        for source in finding.get("supporting_sources", []):
+            sid = source.get("source_ref")
+            if not sid:
+                continue
+            meta = src_meta.setdefault(
+                sid, {"citation": source.get("citation", sid), "findings": []}
+            )
+            meta["findings"].append(f"{finding['category']} · {finding['title']}")
+
+    include_all = st.checkbox(
+        "Include all indexed source chunks (not only those cited by findings)",
+        value=not review_findings,
+    )
+    if include_all:
+        for chunk in review_chunks:
+            src_meta.setdefault(chunk.source_ref, {"citation": chunk.citation, "findings": []})
+
+    src_ids = sorted(src_meta)
+    store = reviewer_decisions.load_decisions(matter_id)
+    counts = reviewer_decisions.summary_counts(store, src_ids)
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Approved", counts["approved"])
+    c2.metric("Rejected", counts["rejected"])
+    c3.metric("Needs changes", counts["needs_changes"])
+    c4.metric("Undecided", counts["undecided"])
+    c5.metric("Total chunks", counts["total"])
+
+    if not src_ids:
+        st.info(
+            "No source chunks to review yet. Upload documents, process the Task, "
+            "and run a review (or tick the box above once chunks are indexed)."
+        )
+    else:
+        status_options = list(reviewer_decisions.VALID_STATUSES)
+        status_labels = {
+            "approved": "✅ Approved",
+            "rejected": "❌ Rejected",
+            "needs_changes": "✏️ Needs changes",
+            "undecided": "⏳ Undecided",
+        }
+        reviewer = st.text_input("Reviewer", value="reviewer", key="review_reviewer")
+        with st.form("reviewer_decisions_form"):
+            pending: dict[str, dict] = {}
+            for sid in src_ids:
+                meta = src_meta[sid]
+                current = reviewer_decisions.get_decision(store, sid)
+                st.markdown(f"**{sid}** — {meta['citation']}")
+                if meta["findings"]:
+                    st.caption("Cited by: " + "; ".join(sorted(set(meta["findings"]))))
+                col_status, col_note = st.columns([1, 2])
+                status = col_status.selectbox(
+                    "Decision",
+                    status_options,
+                    index=status_options.index(current["status"]),
+                    format_func=lambda s: status_labels[s],
+                    key=f"status_{sid}",
+                )
+                note = col_note.text_area(
+                    "Note",
+                    value=current["note"],
+                    key=f"note_{sid}",
+                    height=68,
+                )
+                pending[sid] = {"status": status, "note": note}
+                st.divider()
+            if st.form_submit_button("Save decisions", type="primary"):
+                reviewer_decisions.save_decisions(matter_id, pending, reviewer=reviewer)
+                svc.db.log("reviewer_decisions_saved", matter_id, f"{len(pending)} chunk decisions")
+                st.success("Decisions saved to this Task's workspace.")
+                st.rerun()

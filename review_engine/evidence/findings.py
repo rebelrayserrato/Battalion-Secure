@@ -8,6 +8,9 @@ VALID_CATEGORIES = {
     "Missing Document",
     "Contradiction",
     "Timeline Issue",
+    "Risky Clause",
+    "Missing Protection",
+    "Requires Human Review",
     "Unsupported Finding",
 }
 VALID_CONFIDENCE = {"Low", "Medium", "High"}

@@ -96,6 +96,10 @@ class EvidenceIndex:
                     "source_ref": source_ref,
                     "text": text,
                     "citation": metadata["citation"],
+                    "document_name": metadata.get("document_name", ""),
+                    "page": metadata.get("page", -1),
+                    "row": metadata.get("row", -1),
+                    "section": metadata.get("section", ""),
                     "distance": float(distance),
                 }
             )
