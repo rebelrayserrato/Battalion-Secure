@@ -1,0 +1,17 @@
+{
+  "task_id": "FIXTURE-TASK",
+  "decisions": {
+    "SRC-REPORT": {
+      "status": "approve",
+      "note": "Verified against the cited source; termination date confirmed.",
+      "decided_at": "2026-07-12T10:00:00Z",
+      "reviewer": "J. Reviewer"
+    },
+    "SRC-OTHER": {
+      "status": "needs-changes",
+      "note": "Citation is ambiguous; request the underlying record.",
+      "decided_at": "2026-07-12T10:05:00Z",
+      "reviewer": "J. Reviewer"
+    }
+  }
+}
