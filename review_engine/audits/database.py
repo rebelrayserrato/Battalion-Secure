@@ -8,6 +8,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
+from review_engine.clients.jurisdictions import (
+    UNSPECIFIED_STATE,
+    normalize_state,
+    validate_state,
+)
 from review_engine.config.settings import DATABASE_PATH, ensure_directories
 from review_engine.extraction.models import SourceChunk
 
@@ -39,9 +44,15 @@ class ReviewDatabase:
         with self.connect() as db:
             db.executescript(
                 """
+                CREATE TABLE IF NOT EXISTS clients (
+                    id TEXT PRIMARY KEY, display_name TEXT NOT NULL,
+                    state TEXT NOT NULL, created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS matters (
                     id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT,
-                    jurisdiction TEXT, created_at TEXT NOT NULL
+                    jurisdiction TEXT, created_at TEXT NOT NULL,
+                    client_id TEXT REFERENCES clients(id)
                 );
                 CREATE TABLE IF NOT EXISTS documents (
                     id INTEGER PRIMARY KEY AUTOINCREMENT, matter_id TEXT NOT NULL,
@@ -73,10 +84,145 @@ class ReviewDatabase:
                 );
                 """
             )
+        # RAYAAAA-244: link every matter to a first-class Client and backfill any
+        # pre-existing (pre-Client) matters. Idempotent — safe on every boot.
+        self._ensure_client_link()
 
     @staticmethod
     def now() -> str:
         return datetime.now(timezone.utc).isoformat()
+
+    # --- Client concept (RAYAAAA-244, Phase A) -----------------------------
+    #
+    # A Client owns one or more Tasks/matters and carries the jurisdiction (US
+    # state). ``matters.jurisdiction`` is DERIVED from the client at read time
+    # (see get_matter/list_matters) so it can never diverge from the client.
+    #
+    # Identity mapping (documented in docs/RAYAAAA-244-client-concept.md): the
+    # Client ``id`` is the SAME client identifier the GDPR erasure fan-out
+    # (RAYAAAA-207/223) already uses to group a client's matters — there is no
+    # second identity store. ``create_matter(..., client_id=<portal id>)``
+    # materializes the Battalion client row keyed by that same identity.
+
+    def _insert_client(
+        self, db, display_name: str, state: str, client_id: str | None = None
+    ) -> str:
+        cid = client_id or f"CLI-{uuid.uuid4().hex[:10].upper()}"
+        now = self.now()
+        name = (display_name or "").strip() or cid
+        db.execute(
+            "INSERT INTO clients(id,display_name,state,created_at,updated_at) VALUES(?,?,?,?,?)",
+            (cid, name, state, now, now),
+        )
+        return cid
+
+    def _resolve_client(
+        self, db, client_id: str | None, name: str, jurisdiction: str
+    ) -> tuple[str, str]:
+        """Return (client_id, state) for a matter, creating a client if needed.
+
+        - Explicit known ``client_id`` -> reuse it (state comes from the client).
+        - Explicit UNKNOWN ``client_id`` -> materialize a client keyed by that same
+          identity (this is how the erasure-fanout client id becomes the Battalion
+          client id; no parallel identity store).
+        - No ``client_id`` (legacy/producer path) -> create a 1:1 client for this
+          matter so the "exactly one client per Task" invariant always holds.
+        """
+        if client_id:
+            row = db.execute(
+                "SELECT id, state FROM clients WHERE id=?", (client_id,)
+            ).fetchone()
+            if row:
+                return row["id"], row["state"]
+            state = normalize_state(jurisdiction) or UNSPECIFIED_STATE
+            self._insert_client(db, name or client_id, state, client_id=client_id)
+            return client_id, state
+        state = normalize_state(jurisdiction) or UNSPECIFIED_STATE
+        cid = self._insert_client(db, name or "Synthetic Client", state)
+        return cid, state
+
+    def _ensure_client_link(self) -> None:
+        """Add the matters.client_id column if absent and backfill orphan matters.
+
+        Backfill is 1:1 and lossless: each pre-Client matter gets its own Client
+        (named after the matter) carrying the matter's old free-text jurisdiction
+        normalized to a state code (or ``UNSPECIFIED_STATE`` when unrecognizable).
+        When the original free-text can't be normalized it is preserved verbatim in
+        an audit-log entry so nothing is lost.
+        """
+        with self.connect() as db:
+            cols = [row[1] for row in db.execute("PRAGMA table_info(matters)")]
+            if "client_id" not in cols:
+                db.execute(
+                    "ALTER TABLE matters ADD COLUMN client_id TEXT REFERENCES clients(id)"
+                )
+            orphans = db.execute(
+                "SELECT id, name, jurisdiction FROM matters "
+                "WHERE client_id IS NULL OR client_id=''"
+            ).fetchall()
+            for matter_id, name, juris in orphans:
+                state = normalize_state(juris) or UNSPECIFIED_STATE
+                cid = self._insert_client(db, name or matter_id, state)
+                original = (juris or "").strip()
+                if original and normalize_state(original) is None:
+                    db.execute(
+                        "INSERT INTO audit_logs(matter_id,event_type,details,timestamp) "
+                        "VALUES(?,?,?,?)",
+                        (
+                            matter_id,
+                            "client_backfill",
+                            f"linked to client {cid}; original jurisdiction text "
+                            f"preserved: {original!r}",
+                            self.now(),
+                        ),
+                    )
+                db.execute(
+                    "UPDATE matters SET client_id=?, jurisdiction=? WHERE id=?",
+                    (cid, state, matter_id),
+                )
+
+    def create_client(
+        self, display_name: str, state: str, client_id: str | None = None
+    ) -> str:
+        """Create a Client with a validated jurisdiction. Returns the client id."""
+        code = validate_state(state)
+        name = (display_name or "").strip()
+        if not name:
+            raise ValueError("Client display name is required.")
+        with self.connect() as db:
+            cid = self._insert_client(db, name, code, client_id)
+        self.log("client_created", None, f"{cid}: {name} [{code}]")
+        return cid
+
+    def list_clients(self) -> list[dict]:
+        with self.connect() as db:
+            return [
+                dict(row)
+                for row in db.execute("SELECT * FROM clients ORDER BY display_name")
+            ]
+
+    def get_client(self, client_id: str) -> dict | None:
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT * FROM clients WHERE id=?", (client_id,)
+            ).fetchone()
+            return dict(row) if row else None
+
+    def update_client_state(self, client_id: str, state: str) -> None:
+        """Change a client's jurisdiction; matters derive from it so they stay in
+        sync (the stored matters.jurisdiction is also refreshed defensively)."""
+        code = validate_state(state)
+        with self.connect() as db:
+            cur = db.execute(
+                "UPDATE clients SET state=?, updated_at=? WHERE id=?",
+                (code, self.now(), client_id),
+            )
+            if cur.rowcount == 0:
+                raise ValueError(f"Unknown client_id: {client_id!r}")
+            db.execute(
+                "UPDATE matters SET jurisdiction=? WHERE client_id=?", (code, client_id)
+            )
+        self.log("client_updated", None, f"{client_id}: state -> {code}")
 
     def log(self, event_type: str, matter_id: str | None = None, details: str = "") -> None:
         with self.connect() as db:
@@ -85,25 +231,57 @@ class ReviewDatabase:
                 (matter_id, event_type, details, self.now()),
             )
 
+    # Read matters with jurisdiction DERIVED from the linked client (never the
+    # possibly-stale stored column) so a Task's jurisdiction can't diverge from
+    # its client's. ``client_name`` is surfaced for the UI.
+    _MATTER_SELECT = (
+        "SELECT m.id, m.name, m.description, m.created_at, m.client_id, "
+        "COALESCE(c.state, m.jurisdiction) AS jurisdiction, "
+        "c.display_name AS client_name "
+        "FROM matters m LEFT JOIN clients c ON c.id = m.client_id"
+    )
+
     def create_matter(
-        self, name: str, description: str = "", jurisdiction: str = ""
+        self,
+        name: str,
+        description: str = "",
+        jurisdiction: str = "",
+        client_id: str | None = None,
     ) -> str:
         matter_id = f"MAT-{uuid.uuid4().hex[:10].upper()}"
         with self.connect() as db:
+            resolved_client, state = self._resolve_client(
+                db, client_id, name, jurisdiction
+            )
             db.execute(
-                "INSERT INTO matters VALUES(?,?,?,?,?)",
-                (matter_id, name.strip(), description.strip(), jurisdiction.strip(), self.now()),
+                "INSERT INTO matters(id,name,description,jurisdiction,created_at,client_id) "
+                "VALUES(?,?,?,?,?,?)",
+                (
+                    matter_id,
+                    name.strip(),
+                    description.strip(),
+                    state,
+                    self.now(),
+                    resolved_client,
+                ),
             )
         self.log("matter_created", matter_id, name)
         return matter_id
 
     def list_matters(self) -> list[dict]:
         with self.connect() as db:
-            return [dict(row) for row in db.execute("SELECT * FROM matters ORDER BY created_at DESC")]
+            return [
+                dict(row)
+                for row in db.execute(
+                    f"{self._MATTER_SELECT} ORDER BY m.created_at DESC"
+                )
+            ]
 
     def get_matter(self, matter_id: str) -> dict | None:
         with self.connect() as db:
-            row = db.execute("SELECT * FROM matters WHERE id=?", (matter_id,)).fetchone()
+            row = db.execute(
+                f"{self._MATTER_SELECT} WHERE m.id=?", (matter_id,)
+            ).fetchone()
             return dict(row) if row else None
 
     def add_document(self, matter_id: str, name: str, path: Path) -> None:
