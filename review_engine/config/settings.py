@@ -49,6 +49,16 @@ ZIP_MAX_FILES = _env_int("REVIEW_ENGINE_ZIP_MAX_FILES", 512)
 ZIP_MAX_TOTAL_BYTES = _env_int("REVIEW_ENGINE_ZIP_MAX_TOTAL_BYTES", 512 * 1024 * 1024)
 ZIP_MAX_RATIO = _env_int("REVIEW_ENGINE_ZIP_MAX_RATIO", 100)
 
+# --- MCP multi-model connector (RAYAAAA-246, Phase B1) ---
+# Real egress to OpenAI / Anthropic / Hermes is OFF by default. Flip
+# MCP_CONNECTOR_ENABLED=1 (behind the internal auth gate) to allow live calls;
+# otherwise every provider runs in deterministic mock/stub mode. MCP_MOCK=1
+# forces mock even when the connector is enabled. API keys are read from the
+# environment only (OPENAI_API_KEY / ANTHROPIC_API_KEY / HERMES_API_KEY) and are
+# never stored in source. Synthetic-only until the Phase C gate.
+MCP_CONNECTOR_ENABLED = _env_flag("MCP_CONNECTOR_ENABLED", False)
+MCP_FORCE_MOCK = _env_flag("MCP_MOCK", False)
+
 
 def ensure_directories() -> None:
     for path in (
