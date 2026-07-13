@@ -13,5 +13,7 @@ data/processed/*
 !data/processed/.gitkeep
 data/matters/*
 !data/matters/.gitkeep
+data/reviewer_decisions/
+review_engine/data/reviewer_decisions/
 *.docx
 *.pdf
