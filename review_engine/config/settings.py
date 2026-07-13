@@ -26,6 +26,14 @@ UPLOADS_DIR = DATA_DIR / "uploads"
 PROCESSED_DIR = DATA_DIR / "processed"
 INDEXES_DIR = DATA_DIR / "indexes"
 SAMPLES_DIR = DATA_DIR / "samples"
+# RAYAAAA-245 (Phase B): a Client's uploaded HR/company policy corpus lives
+# entirely apart from any single Task's documents. Policy uploads and the
+# client-scoped Chroma indexes get their own directory trees, keyed by client
+# id, so Client X's policy library is physically isolated from Client Y's and
+# from every Task index (the cross-client isolation boundary is enforced by
+# this scoping, not by post-filtering).
+POLICY_UPLOADS_DIR = DATA_DIR / "policy_uploads"
+POLICY_INDEXES_DIR = DATA_DIR / "policy_indexes"
 DATABASE_PATH = DATA_DIR / "review_engine.sqlite3"
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
@@ -68,5 +76,7 @@ def ensure_directories() -> None:
         PROCESSED_DIR,
         INDEXES_DIR,
         SAMPLES_DIR,
+        POLICY_UPLOADS_DIR,
+        POLICY_INDEXES_DIR,
     ):
         path.mkdir(parents=True, exist_ok=True)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import streamlit as st
 
 from review_engine.app.policy_audit import PolicyAuditor
-from review_engine.app.retrieval import GroundedAnswerer
+from review_engine.app.retrieval import GroundedAnswerer, make_client_scoped_retriever
 from review_engine.app.services import ReviewService
 from review_engine.clients.jurisdictions import (
     JURISDICTION_CHOICES,
@@ -68,8 +68,12 @@ with st.sidebar:
         st.success(notice)
     view_mode = st.radio(
         "View",
-        ["Task workspace", "Cross-Task risk dashboard"],
-        help="The workspace reviews one Task; the dashboard aggregates risk across all Tasks.",
+        ["Task workspace", "Client policy library", "Cross-Task risk dashboard"],
+        help=(
+            "The workspace reviews one Task; the policy library manages a "
+            "Client's own policy corpus; the dashboard aggregates risk across "
+            "all Tasks."
+        ),
     )
     # RAYAAAA-244: Clients are first-class. A Task belongs to exactly one Client,
     # and jurisdiction (US state) lives on the Client. Manage clients here, then
@@ -136,6 +140,79 @@ with st.sidebar:
                         st.rerun()
                     else:
                         st.error("Task name is required.")
+
+if view_mode == "Client policy library":
+    # RAYAAAA-245 (Phase B): manage a Client's own uploaded HR/company policy
+    # corpus. Uploaded ONCE per Client and indexed apart from any Task's docs;
+    # a Task's Chat / policy-audit retrieval then composes the Task index with
+    # ONLY its linked client's policy library (never another client's).
+    st.subheader("Client policy library")
+    st.caption(
+        "Upload each Client's own HR/company policies once. They are stored and "
+        "indexed separately from any Task's documents, and a Task's Chat and "
+        "before-you-sign review pull from the Task's docs plus ONLY this "
+        "Client's policies. Synthetic / owner-internal data only."
+    )
+    if not clients:
+        st.info("Create a client in the sidebar first — the policy library is per-client.")
+        st.stop()
+    lib_client = st.selectbox(
+        "Client",
+        options=[c["id"] for c in clients],
+        format_func=lambda cid: client_label.get(cid, cid),
+        key="policy_lib_client",
+    )
+    policy_uploads = st.file_uploader(
+        "Upload policy documents",
+        type=["pdf", "docx", "txt", "csv", "xlsx", "png", "jpg", "jpeg", "zip"],
+        accept_multiple_files=True,
+        key="policy_uploader",
+        help="Stored under this client's local policy library; not sent for model training.",
+    )
+    if st.button("Save policy files", disabled=not policy_uploads, key="policy_save"):
+        for uploaded in policy_uploads:
+            svc.save_policy_upload(lib_client, uploaded.name, uploaded.getvalue())
+        st.success(f"Saved {len(policy_uploads)} policy file(s).")
+        st.rerun()
+    policy_docs = svc.db.list_policy_documents(lib_client)
+    if policy_docs:
+        st.dataframe(
+            [
+                {
+                    "Policy document": item["name"],
+                    "Type": item["file_type"],
+                    "Bytes": item["size"],
+                    "Indexed": item["processed_at"] or "No",
+                }
+                for item in policy_docs
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+        col_proc, col_del = st.columns(2)
+        with col_proc:
+            if st.button("Process policy library", type="primary", key="policy_process"):
+                with st.spinner("Extracting and indexing this client's policies…"):
+                    result = svc.process_policy_library(lib_client)
+                if result["errors"]:
+                    st.warning("\n".join(result["errors"]))
+                st.success(
+                    f"Indexed {result['processed']} policy document(s) into "
+                    f"{result['chunks']} source chunks."
+                )
+        with col_del:
+            to_delete = st.selectbox(
+                "Remove a policy document",
+                options=["—"] + [d["name"] for d in policy_docs],
+                key="policy_delete_pick",
+            )
+            if st.button("Delete selected policy", disabled=to_delete == "—", key="policy_delete"):
+                svc.delete_policy_document(lib_client, to_delete)
+                st.success(f"Removed {to_delete} from the policy library.")
+                st.rerun()
+    else:
+        st.info("No policy documents uploaded for this client yet.")
+    st.stop()
 
 if view_mode == "Cross-Task risk dashboard":
     render_dashboard(svc)
@@ -318,8 +395,9 @@ with tabs[7]:
     # RAYAAAA-232 (P2a): grounded RAG chat. Answers ONLY from this Task's
     # indexed evidence; local model only; degrades to raw passages offline.
     st.caption(
-        "Ask a question about this Task's documents. Answers are drawn only "
-        "from the local evidence index and cite source references. Requires "
+        "Ask a question about this Task's documents AND this Client's policy "
+        "library. Answers are drawn only from the local evidence indexes "
+        "(Task + linked-client policies) and cite source references. Requires "
         "human review."
     )
     question = st.text_input(
@@ -328,7 +406,10 @@ with tabs[7]:
     )
     if st.button("Ask", key="chat_ask", disabled=not question.strip()):
         with st.spinner("Retrieving evidence and drafting a grounded answer…"):
-            result = GroundedAnswerer().answer(matter_id, question)
+            # RAYAAAA-245: compose the Task index with ONLY the linked client's
+            # policy library (scoped by client id; never another client's).
+            answerer = GroundedAnswerer(retriever=make_client_scoped_retriever(svc.db))
+            result = answerer.answer(matter_id, question)
         st.write(result["answer"])
         if result["sources"]:
             st.write("Sources:")
@@ -341,13 +422,34 @@ with tabs[8]:
     # RAYAAAA-233 (P2b): policy-audit / before-you-sign. Templated review over
     # the same retrieval; reuses the findings/source-reference model.
     st.caption(
-        "\"Before you sign\": screens this Task's documents against a checklist "
-        "for unusual/risky clauses and missing protections. Evidence-bound, "
+        "\"Before you sign\": screens this Task's documents against this Client's "
+        "own policy library plus a generic risky-clause checklist, flagging "
+        "unusual/risky clauses and missing protections. Evidence-bound, "
         "local-only, and a screening aid — requires human review."
     )
+    # RAYAAAA-245: build a client-specific checklist from the linked client's
+    # policy library (SCOPE 3) and add it to the generic default; audit over the
+    # composed Task + linked-client-policy retrieval (SCOPE 2).
+    from review_engine.app.policy_audit import DEFAULT_CHECKLIST, checklist_from_policies
+
+    audit_client_id = matter.get("client_id")
+    policy_chunks = svc.db.get_policy_chunks(audit_client_id) if audit_client_id else []
+    policy_checklist = checklist_from_policies(policy_chunks)
+    audit_checklist = policy_checklist + DEFAULT_CHECKLIST
+    if policy_checklist:
+        st.caption(
+            f"Auditing against {len(policy_checklist)} of this client's own "
+            "policy document(s) plus the generic checklist."
+        )
+    else:
+        st.caption(
+            "This client has no processed policy library yet — running the "
+            "generic checklist only. Add policies in the Client policy library view."
+        )
     if st.button("Run before-you-sign review", type="primary", key="policy_audit_run"):
         with st.spinner("Screening retrieved clauses against the checklist…"):
-            audit_findings = PolicyAuditor().audit(matter_id)
+            auditor = PolicyAuditor(retriever=make_client_scoped_retriever(svc.db))
+            audit_findings = auditor.audit(matter_id, checklist=audit_checklist)
         st.session_state["policy_audit_findings"] = audit_findings
     audit_findings = st.session_state.get("policy_audit_findings")
     if audit_findings is None:

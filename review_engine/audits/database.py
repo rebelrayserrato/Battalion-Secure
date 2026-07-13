@@ -66,6 +66,18 @@ class ReviewDatabase:
                     page INTEGER, row_number INTEGER, section TEXT, text TEXT NOT NULL,
                     FOREIGN KEY(matter_id) REFERENCES matters(id)
                 );
+                CREATE TABLE IF NOT EXISTS client_policy_documents (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, client_id TEXT NOT NULL,
+                    name TEXT NOT NULL, path TEXT NOT NULL, file_type TEXT NOT NULL,
+                    size INTEGER, uploaded_at TEXT NOT NULL, processed_at TEXT,
+                    UNIQUE(client_id, name), FOREIGN KEY(client_id) REFERENCES clients(id)
+                );
+                CREATE TABLE IF NOT EXISTS policy_chunks (
+                    source_ref TEXT PRIMARY KEY, client_id TEXT NOT NULL,
+                    document_name TEXT NOT NULL, file_type TEXT NOT NULL,
+                    page INTEGER, row_number INTEGER, section TEXT, text TEXT NOT NULL,
+                    FOREIGN KEY(client_id) REFERENCES clients(id)
+                );
                 CREATE TABLE IF NOT EXISTS entities (
                     id INTEGER PRIMARY KEY AUTOINCREMENT, matter_id TEXT NOT NULL,
                     entity_type TEXT NOT NULL, value TEXT NOT NULL, source_ref TEXT NOT NULL,
@@ -398,6 +410,91 @@ class ReviewDatabase:
                 item["human_review_required"] = bool(item["human_review_required"])
                 result.append(item)
             return result
+
+    # --- Client policy library (RAYAAAA-245, Phase B) ----------------------
+    #
+    # A Client's uploaded HR/company policy corpus is stored and indexed apart
+    # from any single Task's documents. These rows are keyed by ``client_id``;
+    # the on-disk index is ``PolicyLibraryIndex(client_id)`` (client-scoped
+    # Chroma store). Policy chunks reuse the ``SourceChunk`` shape where the
+    # ``matter_id`` field carries the *client id* (that is what was passed to
+    # ``extract_document`` and what salts the source-reference), keeping one
+    # ingestion/chunk model rather than a parallel one.
+
+    def add_policy_document(self, client_id: str, name: str, path: Path) -> None:
+        with self.connect() as db:
+            db.execute(
+                """INSERT INTO client_policy_documents(client_id,name,path,file_type,size,uploaded_at)
+                   VALUES(?,?,?,?,?,?)
+                   ON CONFLICT(client_id,name) DO UPDATE SET
+                   path=excluded.path,size=excluded.size,uploaded_at=excluded.uploaded_at,
+                   processed_at=NULL""",
+                (client_id, name, str(path), path.suffix.lower(), path.stat().st_size, self.now()),
+            )
+        self.log("policy_uploaded", None, f"{client_id}: {name}")
+
+    def list_policy_documents(self, client_id: str) -> list[dict]:
+        with self.connect() as db:
+            return [
+                dict(row)
+                for row in db.execute(
+                    "SELECT * FROM client_policy_documents WHERE client_id=? ORDER BY name",
+                    (client_id,),
+                )
+            ]
+
+    def replace_policy_document_chunks(
+        self, client_id: str, document_name: str, chunks: Iterable[SourceChunk]
+    ) -> None:
+        chunk_list = list(chunks)
+        with self.connect() as db:
+            db.execute(
+                "DELETE FROM policy_chunks WHERE client_id=? AND document_name=?",
+                (client_id, document_name),
+            )
+            db.executemany(
+                """INSERT INTO policy_chunks(source_ref,client_id,document_name,file_type,page,row_number,section,text)
+                   VALUES(?,?,?,?,?,?,?,?)""",
+                [
+                    (
+                        c.source_ref, client_id, c.document_name, c.file_type,
+                        c.page, c.row, c.section, c.text,
+                    )
+                    for c in chunk_list
+                ],
+            )
+            db.execute(
+                "UPDATE client_policy_documents SET processed_at=? WHERE client_id=? AND name=?",
+                (self.now(), client_id, document_name),
+            )
+        self.log("policy_processed", None, f"{client_id}/{document_name}: {len(chunk_list)} chunks")
+
+    def get_policy_chunks(self, client_id: str) -> list[SourceChunk]:
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT * FROM policy_chunks WHERE client_id=? ORDER BY document_name,page,row_number",
+                (client_id,),
+            )
+            return [
+                SourceChunk(
+                    matter_id=row["client_id"], document_name=row["document_name"],
+                    file_type=row["file_type"], page=row["page"], row=row["row_number"],
+                    section=row["section"], text=row["text"], source_ref=row["source_ref"],
+                )
+                for row in rows
+            ]
+
+    def delete_policy_document(self, client_id: str, document_name: str) -> None:
+        with self.connect() as db:
+            db.execute(
+                "DELETE FROM policy_chunks WHERE client_id=? AND document_name=?",
+                (client_id, document_name),
+            )
+            db.execute(
+                "DELETE FROM client_policy_documents WHERE client_id=? AND name=?",
+                (client_id, document_name),
+            )
+        self.log("policy_deleted", None, f"{client_id}/{document_name}")
 
     def get_audit_log(self, matter_id: str) -> list[dict]:
         with self.connect() as db:

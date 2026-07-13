@@ -59,6 +59,48 @@ DEFAULT_CHECKLIST: list[dict] = [
      "query": "governing law jurisdiction dispute resolution arbitration venue"},
 ]
 
+# Cap on how many policy-derived checklist items to generate, so a large policy
+# library does not run an unbounded number of retrievals per audit.
+MAX_POLICY_CHECKLIST_ITEMS = 24
+
+
+def checklist_from_policies(policy_chunks: list, max_items: int = MAX_POLICY_CHECKLIST_ITEMS) -> list[dict]:
+    """Derive a client-specific 'before you sign' checklist from the CLIENT's own
+    policy library (RAYAAAA-245, SCOPE 3).
+
+    Each checklist item is grounded in a real policy document the client uploaded:
+    the query is that policy's own text, so the audit surfaces whether the Task's
+    document aligns with (or contradicts / omits) the client's actual policy — not
+    a generic template. This adds NO facts: every item is derived from indexed
+    client policy chunks, and the audit still only cites SRC IDs that retrieval
+    returns from the local indexes.
+
+    Grouped by policy document so one checklist item corresponds to one policy;
+    the query concatenates that document's leading chunks (bounded) to stay
+    representative without ballooning the prompt.
+    """
+    by_document: dict[str, list] = {}
+    for chunk in policy_chunks:
+        by_document.setdefault(chunk.document_name, []).append(chunk)
+
+    checklist: list[dict] = []
+    for document_name, chunks in by_document.items():
+        # Leading text of the policy doc, bounded, as the retrieval query.
+        query = " ".join(chunk.text.strip() for chunk in chunks[:3])[:600].strip()
+        if not query:
+            continue
+        checklist.append(
+            {
+                "id": f"policy::{document_name}",
+                "label": f"Client policy: {document_name}",
+                "query": query,
+            }
+        )
+        if len(checklist) >= max_items:
+            break
+    return checklist
+
+
 # The findings categories this mode emits. Registered in evidence.findings so
 # create_finding() does not coerce them to 'Unsupported Finding'.
 FLAG_CATEGORY = "Risky Clause"

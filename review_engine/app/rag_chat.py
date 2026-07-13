@@ -90,13 +90,29 @@ class RagChatService:
         cls,
         matter_id: str,
         connector: Optional[OllamaConnector] = None,
+        db=None,
     ) -> "RagChatService":
         """Wire the service to a matter's on-disk Chroma index.
 
         Imported lazily so unit tests can drive the service with a fake retriever
         without pulling in Chroma / the extraction dependency chain.
+
+        When ``db`` is supplied (RAYAAAA-245), retrieval composes the Task's own
+        index with ONLY its linked Client's policy library — never another
+        client's — so chat answers can cite the client's actual policies.
         """
         from review_engine.evidence.index import EvidenceIndex
+
+        if db is not None:
+            from review_engine.app.retrieval import make_client_scoped_retriever
+
+            scoped = make_client_scoped_retriever(db)
+            # Adapt the (matter_id, query, limit) composed retriever to the
+            # chat service's (question, limit) shape by binding this matter.
+            def retriever(question: str, limit: int) -> list[dict]:
+                return scoped(matter_id, question, limit)
+
+            return cls(retriever=retriever, connector=connector)
 
         index = EvidenceIndex(matter_id)
         return cls(retriever=index.search, connector=connector)
