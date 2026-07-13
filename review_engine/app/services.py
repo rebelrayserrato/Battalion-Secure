@@ -5,8 +5,14 @@ import shutil
 from pathlib import Path
 
 from review_engine.audits.database import ReviewDatabase
+from review_engine.clients.policy_library import PolicyLibraryIndex
 from review_engine.compare.redline import ComparisonResult, compare_documents
-from review_engine.config.settings import SUPPORTED_EXTENSIONS, UPLOADS_DIR, ensure_directories
+from review_engine.config.settings import (
+    POLICY_UPLOADS_DIR,
+    SUPPORTED_EXTENSIONS,
+    UPLOADS_DIR,
+    ensure_directories,
+)
 from review_engine.evidence.contradictions import detect_contradictions
 from review_engine.evidence.entities import extract_entities
 from review_engine.evidence.findings import finalize_findings
@@ -89,6 +95,64 @@ class ReviewService:
 
     def search(self, matter_id: str, query: str, limit: int = 8) -> list[dict]:
         return EvidenceIndex(matter_id).search(query, limit)
+
+    # --- Client policy library (RAYAAAA-245, Phase B) ----------------------
+    #
+    # Uploading, ingesting, and searching a Client's own HR/company policy
+    # corpus. This reuses the exact extraction pipeline (extract_document, incl.
+    # the RAYAAAA-230 OCR/image/ZIP handling) and the EvidenceIndex machinery —
+    # there is no parallel ingestion system. Storage is client-scoped and lives
+    # apart from every Task workspace.
+
+    def save_policy_upload(self, client_id: str, name: str, content: bytes) -> Path:
+        clean_name = safe_filename(name)
+        extension = Path(clean_name).suffix.lower()
+        if extension not in SUPPORTED_EXTENSIONS:
+            raise ValueError(f"Unsupported file type: {extension}")
+        target_dir = POLICY_UPLOADS_DIR / client_id
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target = target_dir / clean_name
+        target.write_bytes(content)
+        self.db.add_policy_document(client_id, clean_name, target)
+        return target
+
+    def process_policy_library(self, client_id: str) -> dict:
+        """Extract + (re)index a Client's uploaded policy documents.
+
+        Chunks are salted by ``client_id`` (passed as the extractor's matter_id),
+        stored in ``policy_chunks``, then written to the client-scoped
+        ``PolicyLibraryIndex`` — a physically separate Chroma store keyed by the
+        client id, so it can never be reached from another client's Task query.
+        """
+        processed = 0
+        errors: list[str] = []
+        for document in self.db.list_policy_documents(client_id):
+            try:
+                chunks = extract_document(document["path"], client_id)
+                self.db.replace_policy_document_chunks(client_id, document["name"], chunks)
+                processed += 1
+            except Exception as exc:
+                message = f"{document['name']}: {exc}"
+                errors.append(message)
+                self.db.log("error", None, f"policy {client_id}: {message}")
+        chunks = self.db.get_policy_chunks(client_id)
+        try:
+            count = PolicyLibraryIndex(client_id).build(chunks)
+            self.db.log("policy_index_created", None, f"{client_id}: {count} chunks")
+        except Exception as exc:
+            errors.append(f"Index: {exc}")
+            self.db.log("error", None, f"policy index {client_id}: {exc}")
+        return {"processed": processed, "chunks": len(chunks), "errors": errors}
+
+    def policy_search(self, client_id: str, query: str, limit: int = 8) -> list[dict]:
+        return PolicyLibraryIndex(client_id).search(query, limit)
+
+    def delete_policy_document(self, client_id: str, document_name: str) -> dict:
+        """Remove one policy document and rebuild the client's policy index."""
+        self.db.delete_policy_document(client_id, document_name)
+        remaining = self.db.get_policy_chunks(client_id)
+        count = PolicyLibraryIndex(client_id).build(remaining)
+        return {"remaining_documents": len(self.db.list_policy_documents(client_id)), "chunks": count}
 
     def document_chunks(self, matter_id: str, document_name: str) -> list:
         """Processed chunks for a single document, in reading order.

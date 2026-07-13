@@ -36,8 +36,20 @@ class LocalEmbeddingFunction:
 
 
 class EvidenceIndex:
-    def __init__(self, matter_id: str, root: str | Path = INDEXES_DIR):
+    def __init__(
+        self,
+        matter_id: str,
+        root: str | Path = INDEXES_DIR,
+        *,
+        collection_prefix: str = "matter",
+    ):
+        # ``collection_prefix`` + a per-id subdirectory give each index its own
+        # physical Chroma store AND a distinct collection name. The client-scoped
+        # policy library (RAYAAAA-245) reuses this class with a separate root and
+        # prefix so a Client's policies can never share a store with a Task's
+        # documents or with another Client's library.
         self.matter_id = matter_id
+        self.collection_prefix = collection_prefix
         self.root = Path(root) / matter_id
         self.root.mkdir(parents=True, exist_ok=True)
         self.embedding = LocalEmbeddingFunction()
@@ -48,7 +60,10 @@ class EvidenceIndex:
             import chromadb
 
             client = chromadb.PersistentClient(path=str(self.root))
-            name = "matter_" + hashlib.sha1(self.matter_id.encode()).hexdigest()[:16]
+            name = (
+                f"{self.collection_prefix}_"
+                + hashlib.sha1(self.matter_id.encode()).hexdigest()[:16]
+            )
             self._collection = client.get_or_create_collection(name=name)
         return self._collection
 

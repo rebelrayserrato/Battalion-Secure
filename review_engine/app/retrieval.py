@@ -47,6 +47,56 @@ def default_retriever(matter_id: str, query: str, limit: int) -> list[dict]:
     return EvidenceIndex(matter_id).search(query, limit)
 
 
+# --- Client-scoped composed retrieval (RAYAAAA-245, Phase B) ----------------
+#
+# A Task's grounded retrieval (Chat + policy-audit) composes exactly two sources
+# and nothing else: (a) the Task's own document index and (b) the linked Client's
+# policy library index. It is IMPOSSIBLE to reach another client's policies here
+# because the policy index is instantiated solely from the Task's linked
+# ``client_id`` (structural scoping, not post-filtering). Rows keep a ``origin``
+# tag ("task" | "policy") for provenance; every row still carries source_ref /
+# citation / text / distance so the existing consumers are unchanged.
+
+
+def compose_rows(task_rows: list[dict], policy_rows: list[dict], limit: int) -> list[dict]:
+    for row in task_rows:
+        row.setdefault("origin", "task")
+    for row in policy_rows:
+        row.setdefault("origin", "policy")
+    merged = sorted(task_rows + policy_rows, key=lambda r: r.get("distance", 0.0))
+    return merged[:limit]
+
+
+def make_client_scoped_retriever(
+    db,
+    *,
+    task_index_factory: Optional[Callable] = None,
+    policy_index_factory: Optional[Callable] = None,
+) -> Retriever:
+    """Build a ``(matter_id, query, limit)`` retriever that composes Task docs +
+    the linked Client's policy library only.
+
+    ``db`` resolves a Task's linked client id. The index factories are injectable
+    so tests can prove the isolation boundary without chromadb; they default to
+    the real on-disk indexes.
+    """
+    from review_engine.clients.policy_library import PolicyLibraryIndex
+
+    make_task_index = task_index_factory or EvidenceIndex
+    make_policy_index = policy_index_factory or PolicyLibraryIndex
+
+    def retriever(matter_id: str, query: str, limit: int) -> list[dict]:
+        task_rows = make_task_index(matter_id).search(query, limit) or []
+        matter = db.get_matter(matter_id) or {}
+        client_id = matter.get("client_id")
+        policy_rows: list[dict] = []
+        if client_id:
+            policy_rows = make_policy_index(client_id).search(query, limit) or []
+        return compose_rows(list(task_rows), list(policy_rows), limit)
+
+    return retriever
+
+
 @dataclass(frozen=True)
 class RetrievedSource:
     """Adapts a retrieval row to the attribute shape ``create_finding`` expects."""
