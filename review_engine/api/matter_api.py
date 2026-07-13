@@ -54,6 +54,11 @@ class CreateMatterRequest(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     description: str = Field(default="", max_length=2000)
     jurisdiction: str = Field(default="", max_length=200)
+    # RAYAAAA-244: the producer may pass the SAME client identity the erasure
+    # fan-out (RAYAAAA-207/223) uses to group a client's matters. Battalion
+    # materializes/links a Client row keyed by that id — no parallel identity
+    # store. Omitted (current producer) -> a 1:1 synthetic client is created.
+    client_id: str | None = Field(default=None, max_length=64)
 
 
 class MatterResponse(BaseModel):
@@ -107,7 +112,9 @@ def create_matter(
     name = body.name.strip()
     if not name:
         raise HTTPException(status_code=422, detail="Matter name is required.")
-    matter_id = _db.create_matter(name, body.description, body.jurisdiction)
+    matter_id = _db.create_matter(
+        name, body.description, body.jurisdiction, client_id=body.client_id
+    )
     matter = _db.get_matter(matter_id) or {}
     return MatterResponse(
         matter_id=matter_id,

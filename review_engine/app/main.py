@@ -4,6 +4,11 @@ import streamlit as st
 
 from review_engine.app.rag_chat import RagChatService
 from review_engine.app.services import ReviewService
+from review_engine.clients.jurisdictions import (
+    JURISDICTION_CHOICES,
+    UNSPECIFIED_STATE,
+    state_label,
+)
 from review_engine.llm_connectors.ollama import OllamaConnector
 from review_engine.privacy.erasure import erase_matter
 from review_engine.reports.generator import generate_docx_report, generate_pdf_report
@@ -57,6 +62,35 @@ with st.sidebar:
     notice = st.session_state.pop("_deleted_notice", None)
     if notice:
         st.success(notice)
+    # RAYAAAA-244: Clients are first-class. A Task belongs to exactly one Client,
+    # and jurisdiction (US state) lives on the Client. Manage clients here, then
+    # pick one when creating a Task below.
+    st.header("Clients")
+    clients = svc.db.list_clients()
+    client_label = {
+        c["id"]: f"{c['display_name']} · {state_label(c['state'])}" for c in clients
+    }
+    if clients:
+        st.caption(f"{len(clients)} client(s).")
+    else:
+        st.caption("No clients yet — create one below.")
+    with st.expander("Create a client", expanded=not clients):
+        with st.form("create_client"):
+            client_name = st.text_input("Client name")
+            client_state = st.selectbox(
+                "Jurisdiction (US state)",
+                options=JURISDICTION_CHOICES,
+                index=JURISDICTION_CHOICES.index(UNSPECIFIED_STATE),
+                format_func=state_label,
+            )
+            if st.form_submit_button("Create client", type="primary"):
+                if client_name.strip():
+                    new_client = svc.db.create_client(client_name, client_state)
+                    st.success(f"Created client {new_client}.")
+                    st.rerun()
+                else:
+                    st.error("Client name is required.")
+
     st.header("Task workspace")
     # RAYAAAA-228: show every task as a persistent list in the sidebar (instead
     # of a dropdown) so the whole workspace is visible at a glance. The radio
@@ -74,18 +108,25 @@ with st.sidebar:
         matter_id = None
         st.caption("No tasks yet — create one below.")
     with st.expander("Create a task", expanded=not matters):
-        # RAYAAAA-228: creation needs a name only. Description/jurisdiction still
-        # default to empty in create_matter and can be added later; the owner's
-        # ask is that starting a task requires nothing but a name.
-        with st.form("create_matter"):
-            name = st.text_input("Task name")
-            if st.form_submit_button("Create task", type="primary"):
-                if name.strip():
-                    created = svc.db.create_matter(name)
-                    st.success(f"Created {created}.")
-                    st.rerun()
-                else:
-                    st.error("Task name is required.")
+        # RAYAAAA-228: creation needs a name only. RAYAAAA-244: a Task must be
+        # attached to a Client (which carries the jurisdiction), so pick one here.
+        if not clients:
+            st.info("Create a client first — every Task belongs to a client.")
+        else:
+            with st.form("create_matter"):
+                name = st.text_input("Task name")
+                picked_client = st.selectbox(
+                    "Client",
+                    options=[c["id"] for c in clients],
+                    format_func=lambda cid: client_label.get(cid, cid),
+                )
+                if st.form_submit_button("Create task", type="primary"):
+                    if name.strip():
+                        created = svc.db.create_matter(name, client_id=picked_client)
+                        st.success(f"Created {created}.")
+                        st.rerun()
+                    else:
+                        st.error("Task name is required.")
 
 if not matter_id:
     st.info("Create or select a task to begin.")
@@ -95,6 +136,12 @@ matter = svc.db.get_matter(matter_id)
 header_col, delete_col = st.columns([5, 1])
 with header_col:
     st.subheader(f"{matter['name']} · {matter_id}")
+    # RAYAAAA-244: a Task always resolves to exactly one Client, and its
+    # jurisdiction is derived from that Client (never diverges).
+    st.caption(
+        f"Client: {matter.get('client_name') or '—'} · "
+        f"Jurisdiction: {state_label(matter.get('jurisdiction') or UNSPECIFIED_STATE)}"
+    )
 with delete_col:
     # RAYAAAA-228: owner-initiated in-process deletion of a task. This calls
     # erase_matter directly (NOT the HTTP fan-out endpoint, which is for the
@@ -114,8 +161,11 @@ with delete_col:
                 f"Deleted task {matter['name']} with residual: {report.residual_summary()}"
             )
         st.rerun()
-if not matter.get("jurisdiction"):
-    st.warning("Jurisdiction required for jurisdiction-dependent legal review.")
+if (matter.get("jurisdiction") or UNSPECIFIED_STATE) == UNSPECIFIED_STATE:
+    st.warning(
+        "Jurisdiction unspecified — set the client's US state for "
+        "jurisdiction-dependent legal review."
+    )
 
 tabs = st.tabs(
     [
