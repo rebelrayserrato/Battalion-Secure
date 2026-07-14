@@ -8,10 +8,16 @@ from review_engine.audits.database import ReviewDatabase
 from review_engine.clients.policy_library import PolicyLibraryIndex
 from review_engine.compare.redline import ComparisonResult, compare_documents
 from review_engine.config.settings import (
+    LAW_UPLOADS_DIR,
     POLICY_UPLOADS_DIR,
     SUPPORTED_EXTENSIONS,
     UPLOADS_DIR,
     ensure_directories,
+)
+from review_engine.law.library import (
+    LawLibraryIndex,
+    LawProvenance,
+    validate_law_jurisdiction,
 )
 from review_engine.evidence.contradictions import detect_contradictions
 from review_engine.evidence.entities import extract_entities
@@ -153,6 +159,98 @@ class ReviewService:
         remaining = self.db.get_policy_chunks(client_id)
         count = PolicyLibraryIndex(client_id).build(remaining)
         return {"remaining_documents": len(self.db.list_policy_documents(client_id)), "chunks": count}
+
+    # --- Jurisdiction-scoped law reference library (RAYAAAA-251, Phase C) ---
+    #
+    # Upload/ingest/search a jurisdiction's law corpus. Reuses the SAME extraction
+    # pipeline (extract_document, incl. RAYAAAA-230 OCR/image/ZIP) and the
+    # EvidenceIndex machinery — no parallel ingestion. Storage is keyed by
+    # jurisdiction and lives entirely apart from any Task or Client corpus.
+
+    def save_law_upload(
+        self,
+        jurisdiction: str,
+        name: str,
+        content: bytes,
+        *,
+        source_name: str,
+        source_url: str,
+        effective: str,
+        retrieved: str,
+    ) -> Path:
+        canonical = validate_law_jurisdiction(jurisdiction)
+        # AC B: reject a law document missing any mandatory provenance field.
+        provenance = LawProvenance(
+            source_name=source_name,
+            source_url=source_url,
+            effective=effective,
+            retrieved=retrieved,
+        ).validate()
+        clean_name = safe_filename(name)
+        extension = Path(clean_name).suffix.lower()
+        if extension not in SUPPORTED_EXTENSIONS:
+            raise ValueError(f"Unsupported file type: {extension}")
+        target_dir = LAW_UPLOADS_DIR / canonical
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target = target_dir / clean_name
+        target.write_bytes(content)
+        self.db.add_law_document(
+            canonical,
+            clean_name,
+            target,
+            source_name=provenance.source_name,
+            source_url=provenance.source_url,
+            effective=provenance.effective,
+            retrieved=provenance.retrieved,
+        )
+        return target
+
+    def process_law_library(self, jurisdiction: str) -> dict:
+        """Extract + (re)index a jurisdiction's law documents, attaching each
+        document's mandatory provenance to every chunk so retrieved law rows carry
+        their own citation-provenance stamp."""
+        canonical = validate_law_jurisdiction(jurisdiction)
+        processed = 0
+        errors: list[str] = []
+        for document in self.db.list_law_documents(canonical):
+            try:
+                chunks = extract_document(document["path"], canonical)
+                self.db.replace_law_document_chunks(canonical, document["name"], chunks)
+                processed += 1
+            except Exception as exc:
+                message = f"{document['name']}: {exc}"
+                errors.append(message)
+                self.db.log("error", None, f"law {canonical}: {message}")
+        chunks = self.db.get_law_chunks(canonical)
+        provenance = {
+            name: LawProvenance(**prov)
+            for name, prov in self.db.law_provenance(canonical).items()
+        }
+        try:
+            count = LawLibraryIndex(canonical).build_with_provenance(chunks, provenance)
+            self.db.log("law_index_created", None, f"{canonical}: {count} chunks")
+        except Exception as exc:
+            errors.append(f"Index: {exc}")
+            self.db.log("error", None, f"law index {canonical}: {exc}")
+        return {"processed": processed, "chunks": len(chunks), "errors": errors}
+
+    def law_search(self, jurisdiction: str, query: str, limit: int = 8) -> list[dict]:
+        return LawLibraryIndex(jurisdiction).search(query, limit)
+
+    def delete_law_document(self, jurisdiction: str, document_name: str) -> dict:
+        """Remove one law document and rebuild the jurisdiction's law index."""
+        canonical = validate_law_jurisdiction(jurisdiction)
+        self.db.delete_law_document(canonical, document_name)
+        remaining = self.db.get_law_chunks(canonical)
+        provenance = {
+            name: LawProvenance(**prov)
+            for name, prov in self.db.law_provenance(canonical).items()
+        }
+        count = LawLibraryIndex(canonical).build_with_provenance(remaining, provenance)
+        return {
+            "remaining_documents": len(self.db.list_law_documents(canonical)),
+            "chunks": count,
+        }
 
     def document_chunks(self, matter_id: str, document_name: str) -> list:
         """Processed chunks for a single document, in reading order.

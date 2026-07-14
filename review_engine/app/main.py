@@ -10,6 +10,13 @@ from review_engine.clients.jurisdictions import (
     UNSPECIFIED_STATE,
     state_label,
 )
+from review_engine.law.grounding import LawGroundedAnswerer, make_law_grounded_retriever
+from review_engine.law.library import (
+    LAW_DISCLAIMER,
+    LAW_JURISDICTION_CHOICES,
+    law_jurisdiction_label,
+    resolve_law_jurisdictions,
+)
 from review_engine.llm_connectors.ollama import OllamaConnector
 from review_engine.privacy.erasure import erase_matter
 from review_engine.reports.generator import generate_docx_report, generate_pdf_report
@@ -68,11 +75,17 @@ with st.sidebar:
         st.success(notice)
     view_mode = st.radio(
         "View",
-        ["Task workspace", "Client policy library", "Cross-Task risk dashboard"],
+        [
+            "Task workspace",
+            "Client policy library",
+            "Law reference library",
+            "Cross-Task risk dashboard",
+        ],
         help=(
             "The workspace reviews one Task; the policy library manages a "
-            "Client's own policy corpus; the dashboard aggregates risk across "
-            "all Tasks."
+            "Client's own policy corpus; the law reference library manages the "
+            "per-jurisdiction statute/regulation corpus; the dashboard "
+            "aggregates risk across all Tasks."
         ),
     )
     # RAYAAAA-244: Clients are first-class. A Task belongs to exactly one Client,
@@ -214,6 +227,119 @@ if view_mode == "Client policy library":
         st.info("No policy documents uploaded for this client yet.")
     st.stop()
 
+if view_mode == "Law reference library":
+    # RAYAAAA-251 (Phase C): per-JURISDICTION law corpus (statute/regulation text
+    # from OFFICIAL government publishers, per the RAYAAAA-243 Counsel memo).
+    # Public law, keyed by jurisdiction (state code or `federal`) — shared across
+    # all clients in that state and stored entirely apart from any client/Task
+    # corpus (never swept by client-data erasure). Provenance is mandatory.
+    st.subheader("Law reference library")
+    st.caption(
+        "Upload statute/regulation text from OFFICIAL government publishers "
+        "(federal: eCFR / GovInfo / Cornell LII; state: the state's official "
+        "code), keyed by jurisdiction. Public-domain law, shared across all "
+        "clients in that jurisdiction and kept separate from client data. "
+        "Do NOT paste from a paid legal database. Synthetic / owner-internal only."
+    )
+    law_jurisdiction = st.selectbox(
+        "Jurisdiction",
+        options=LAW_JURISDICTION_CHOICES,
+        index=0,
+        format_func=law_jurisdiction_label,
+        key="law_lib_jurisdiction",
+    )
+    st.markdown("**Provenance (all fields required)**")
+    prov_cols = st.columns(2)
+    with prov_cols[0]:
+        law_source_name = st.text_input(
+            "Source / official publisher", key="law_source_name",
+            placeholder="e.g. Cornell LII, eCFR, California Legislative Information",
+        )
+        law_effective = st.text_input(
+            "Effective date / version", key="law_effective",
+            placeholder="e.g. 2024 ed., or effective 2024-01-01",
+        )
+    with prov_cols[1]:
+        law_source_url = st.text_input(
+            "Source URL", key="law_source_url",
+            placeholder="https://www.ecfr.gov/…",
+        )
+        law_retrieved = st.text_input(
+            "Retrieval date (YYYY-MM-DD)", key="law_retrieved",
+            placeholder="2026-07-13",
+        )
+    law_uploads = st.file_uploader(
+        "Upload law documents",
+        type=["pdf", "docx", "txt", "csv", "xlsx", "png", "jpg", "jpeg", "zip"],
+        accept_multiple_files=True,
+        key="law_uploader",
+        help="Stored under this jurisdiction's local law library; not sent for model training.",
+    )
+    _provenance_ready = all(
+        (law_source_name.strip(), law_source_url.strip(), law_effective.strip(), law_retrieved.strip())
+    )
+    if law_uploads and not _provenance_ready:
+        st.warning("All four provenance fields are required before saving law documents.")
+    if st.button(
+        "Save law files",
+        disabled=not (law_uploads and _provenance_ready),
+        key="law_save",
+    ):
+        saved = 0
+        for uploaded in law_uploads:
+            try:
+                svc.save_law_upload(
+                    law_jurisdiction, uploaded.name, uploaded.getvalue(),
+                    source_name=law_source_name, source_url=law_source_url,
+                    effective=law_effective, retrieved=law_retrieved,
+                )
+                saved += 1
+            except ValueError as exc:
+                st.error(f"{uploaded.name}: {exc}")
+        if saved:
+            st.success(f"Saved {saved} law document(s) for {law_jurisdiction_label(law_jurisdiction)}.")
+            st.rerun()
+    law_docs = svc.db.list_law_documents(law_jurisdiction)
+    if law_docs:
+        st.dataframe(
+            [
+                {
+                    "Law document": item["name"],
+                    "Source": item["source_name"],
+                    "Effective": item["effective"],
+                    "Retrieved": item["retrieved"],
+                    "Indexed": item["processed_at"] or "No",
+                }
+                for item in law_docs
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+        col_proc, col_del = st.columns(2)
+        with col_proc:
+            if st.button("Process law library", type="primary", key="law_process"):
+                with st.spinner("Extracting and indexing this jurisdiction's law…"):
+                    result = svc.process_law_library(law_jurisdiction)
+                if result["errors"]:
+                    st.warning("\n".join(result["errors"]))
+                st.success(
+                    f"Indexed {result['processed']} law document(s) into "
+                    f"{result['chunks']} source chunks."
+                )
+        with col_del:
+            to_delete = st.selectbox(
+                "Remove a law document",
+                options=["—"] + [d["name"] for d in law_docs],
+                key="law_delete_pick",
+            )
+            if st.button("Delete selected law doc", disabled=to_delete == "—", key="law_delete"):
+                svc.delete_law_document(law_jurisdiction, to_delete)
+                st.success(f"Removed {to_delete} from the {law_jurisdiction_label(law_jurisdiction)} law library.")
+                st.rerun()
+    else:
+        st.info("No law documents uploaded for this jurisdiction yet.")
+    st.stop()
+
 if view_mode == "Cross-Task risk dashboard":
     render_dashboard(svc)
     st.stop()
@@ -268,6 +394,7 @@ tabs = st.tabs(
         "Audit log",
         "Chat",
         "Policy audit",
+        "Law grounding",
         "Compare",
         "Review",
     ]
@@ -468,6 +595,49 @@ with tabs[8]:
                         st.markdown(f"- {source['citation']}")
 
 with tabs[9]:
+    # RAYAAAA-251 (Phase C): law-grounded Q&A. Composes this Task's docs + the
+    # linked Client's policy library + the jurisdiction-filtered law corpus
+    # ({client state} ∪ {federal} ONLY). Renders the counsel-bound disclaimer on
+    # every answer, stamps each law citation with its provenance, and redacts any
+    # statute citation not backed by a retrieved chunk ("not in reference library").
+    law_juris = resolve_law_jurisdictions(matter.get("jurisdiction"))
+    st.caption(
+        "Ask a law-grounded question. Retrieval is restricted to this Task's "
+        "documents, the linked client's policy library, and the law reference "
+        f"corpus for {', '.join(law_jurisdiction_label(j) for j in law_juris)} "
+        "only — never another state's. Evidence-bound; requires human review."
+    )
+    law_question = st.text_input(
+        "Your law-grounded question", key="law_question",
+        placeholder="What are the meal-break requirements? Which overtime rule applies?",
+    )
+    if st.button("Ask (law-grounded)", key="law_ask", disabled=not law_question.strip()):
+        with st.spinner("Retrieving jurisdiction-scoped evidence and drafting a grounded answer…"):
+            law_answerer = LawGroundedAnswerer(
+                retriever=make_law_grounded_retriever(svc.db)
+            )
+            law_result = law_answerer.answer(matter_id, law_question)
+        # AC G: the exact disclaimer, on every law-grounded answer.
+        st.info(law_result.disclaimer)
+        st.write(law_result.answer)
+        if law_result.redacted_citations:
+            st.warning(
+                "Redacted citation(s) not backed by the reference library: "
+                + ", ".join(law_result.redacted_citations)
+            )
+        if law_result.law_sources:
+            st.markdown("**Law sources (verbatim + provenance):**")
+            for source in law_result.law_sources:
+                st.markdown(f"> {source['quote']}")
+                st.caption(f"{source['citation']} {source['stamp']}")
+        if law_result.task_sources or law_result.policy_sources:
+            st.markdown("**Other sources:**")
+            for source in law_result.task_sources + law_result.policy_sources:
+                st.markdown(f"- {source['citation']}")
+        if not law_result.model_used:
+            st.info("Local model unavailable — showed retrieved passages only.")
+
+with tabs[10]:
     # RAYAAAA-231 (P1b): deterministic document compare / redline between two
     # processed documents (or two versions) in this matter. The diff itself is
     # local + model-free (difflib over the existing SourceChunk model); the
@@ -548,7 +718,7 @@ with tabs[9]:
                         st.markdown(f":green[+ {segment.compare_text}]")
                         st.caption("Compared: " + (", ".join(segment.compare_citations) or "—"))
 
-with tabs[10]:
+with tabs[11]:
     st.caption(
         "Human reviewer workspace — synthetic/local data only. Mark each source "
         "chunk approve / reject / needs-changes and add a note. Decisions are saved "
