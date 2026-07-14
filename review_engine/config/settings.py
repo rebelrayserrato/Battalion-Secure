@@ -92,6 +92,29 @@ MCP_FORCE_MOCK = _env_flag("MCP_MOCK", False)
 CROSS_TASK_ASSISTANT_ENABLED = _env_flag("CROSS_TASK_ASSISTANT_ENABLED", False)
 CROSS_TASK_ASSISTANT_TOKEN = os.getenv("CROSS_TASK_ASSISTANT_TOKEN")
 
+# --- Assistant-surface security hardening (RAYAAAA-256, Phase C Sec/QA) ---
+# Layered ON TOP of the two flags above and the network-level RAYAAAA-205 authz
+# route. See ``review_engine/app/assistant_security.py``.
+#
+# PART A — RBAC + MFA (C1/C2). The assistant/connector is reachable only by an
+# authenticated principal whose role is authorized AND who satisfied a second
+# factor. Identity is read from the headers the authz route / RAYAAAA-136 auth
+# stack forward (defaults follow the oauth2-proxy ``X-Auth-Request-*`` family);
+# the enforcement fails closed when identity/MFA is absent.
+ASSISTANT_AUTHORIZED_ROLES = os.getenv("ASSISTANT_AUTHORIZED_ROLES")  # csv; default owner,admin
+ASSISTANT_ROLE_HEADER = os.getenv("ASSISTANT_ROLE_HEADER", "X-Auth-Request-Role")
+ASSISTANT_MFA_HEADER = os.getenv("ASSISTANT_MFA_HEADER", "X-Auth-Request-Mfa")
+ASSISTANT_USER_HEADER = os.getenv("ASSISTANT_USER_HEADER", "X-Auth-Request-Email")
+#
+# PART B — egress input handling (C5/C10). Everything placed into a provider
+# payload is first malware-scanned (quarantine on hit), prompt-injection-defanged
+# (instruction isolation), and minimized (only retrieved chunks + prompt egress;
+# obvious direct identifiers stripped). All ON by default; each is individually
+# toggleable for deploy tuning without a code change.
+ASSISTANT_EGRESS_SCAN_MALWARE = _env_flag("ASSISTANT_EGRESS_SCAN_MALWARE", True)
+ASSISTANT_EGRESS_GUARD_INJECTION = _env_flag("ASSISTANT_EGRESS_GUARD_INJECTION", True)
+ASSISTANT_EGRESS_MINIMIZE = _env_flag("ASSISTANT_EGRESS_MINIMIZE", True)
+
 
 def ensure_directories() -> None:
     for path in (

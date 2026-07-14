@@ -15,6 +15,12 @@ import os
 import streamlit as st
 
 from review_engine.app.cross_task import CrossTaskAccessError, assistant_enabled
+from review_engine.app.assistant_security import (
+    AssistantAccessError,
+    Principal,
+    enforce_access,
+    principal_from_headers,
+)
 from review_engine.app.cross_task_chat import (
     AssistantResult,
     ModelAnswer,
@@ -25,6 +31,18 @@ from review_engine.app.cross_task_chat import (
 
 # The three owner-facing model labels, in the order the owner named them.
 _MODEL_CHOICES = list(MODEL_LABELS.values())  # ["Codex", "Hermes", "Claude"]
+
+
+def _request_principal() -> Principal:
+    """Resolve the caller from the identity headers the RAYAAAA-205 authz route /
+    RAYAAAA-136 auth stack forward. Absent headers -> an unauthenticated principal
+    (fails closed at ``enforce_access``)."""
+    headers = None
+    try:  # Streamlit >= 1.37 exposes the request headers here.
+        headers = dict(st.context.headers)  # type: ignore[attr-defined]
+    except Exception:
+        headers = None
+    return principal_from_headers(headers)
 
 
 def render_assistant(svc, clients=None, client_label=None) -> None:
@@ -47,6 +65,21 @@ def render_assistant(svc, clients=None, client_label=None) -> None:
             "The cross-Task assistant is disabled. An operator enables it with "
             "`CROSS_TASK_ASSISTANT_ENABLED=1` (owner-internal, synthetic-only; "
             "the Phase 4 PII gate still applies)."
+        )
+        return
+
+    # Gate 2 (RAYAAAA-256 C1/C2): RBAC + MFA. On top of the network-level authz
+    # route (RAYAAAA-205), enforce app-side that the forwarded session holds an
+    # authorized role AND satisfied a second factor. No role / no MFA => the
+    # surface is never rendered and no connector call can be triggered.
+    principal = _request_principal()
+    try:
+        enforce_access(principal)
+    except AssistantAccessError as exc:
+        st.error(f"Access denied: {exc}")
+        st.caption(
+            "The cross-Task assistant requires an authorized role and a verified "
+            "second factor (MFA). Sign in through the console with MFA enabled."
         )
         return
 
@@ -93,8 +126,10 @@ def render_assistant(svc, clients=None, client_label=None) -> None:
         # field). authorize() inside create() enforces both gates.
         token = os.getenv("CROSS_TASK_ASSISTANT_TOKEN")
         try:
+            # Re-enforce RBAC/MFA at construction (defense in depth) alongside the
+            # feature-flag + internal-token gate.
             assistant = MultiModelAssistant.create(
-                svc.db, token=token, client_id=client_id
+                svc.db, token=token, client_id=client_id, principal=principal
             )
         except CrossTaskAccessError as exc:
             st.error(f"Access denied: {exc}")
@@ -120,6 +155,7 @@ def _render_result(result: AssistantResult) -> None:
         _render_answer(result.answers[0])
 
     _render_provenance(result)
+    _render_egress_security(result)
 
 
 def _render_answer(answer: ModelAnswer) -> None:
@@ -146,3 +182,31 @@ def _render_provenance(result: AssistantResult) -> None:
             return
         for source in result.provenance:
             st.markdown(f"- {source.label()}")
+
+
+def _render_egress_security(result: AssistantResult) -> None:
+    # RAYAAAA-256 (C5/C10): show what the egress guard did to the payload before it
+    # left the sealed network — quarantined malware, defanged injection, stripped
+    # identifiers. Evidence that only minimized, sanitized chunks were egressed.
+    report = getattr(result, "security", None)
+    if report is None:
+        return
+    with st.expander("Egress safety · sec/QA (RAYAAAA-256)", expanded=False):
+        st.caption(report.summary())
+        if report.quarantined:
+            st.warning(
+                "Quarantined (malware signature) — dropped from egress: "
+                + ", ".join(report.quarantined)
+            )
+        if report.injection_flagged:
+            st.info(
+                "Prompt-injection defanged in: " + ", ".join(report.injection_flagged)
+            )
+        if report.redacted:
+            kinds = ", ".join(report.redaction_kinds) or "identifiers"
+            st.info(
+                f"Direct identifiers stripped ({kinds}) from: "
+                + ", ".join(report.redacted)
+            )
+        if not (report.quarantined or report.injection_flagged or report.redacted):
+            st.caption("No malware, injection, or direct identifiers detected in egress.")
