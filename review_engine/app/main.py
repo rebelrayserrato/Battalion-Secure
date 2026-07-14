@@ -68,11 +68,17 @@ with st.sidebar:
         st.success(notice)
     view_mode = st.radio(
         "View",
-        ["Task workspace", "Client policy library", "Cross-Task risk dashboard"],
+        [
+            "Task workspace",
+            "Client policy library",
+            "Cross-Task risk dashboard",
+            "Cross-Task assistant",
+        ],
         help=(
             "The workspace reviews one Task; the policy library manages a "
             "Client's own policy corpus; the dashboard aggregates risk across "
-            "all Tasks."
+            "all Tasks; the assistant answers questions ACROSS all your Tasks "
+            "with your choice of model."
         ),
     )
     # RAYAAAA-244: Clients are first-class. A Task belongs to exactly one Client,
@@ -216,6 +222,16 @@ if view_mode == "Client policy library":
 
 if view_mode == "Cross-Task risk dashboard":
     render_dashboard(svc)
+    st.stop()
+
+if view_mode == "Cross-Task assistant":
+    # RAYAAAA-248 (Phase B3): the non-Task-scoped "personal assistant" — wires B1
+    # (multi-model MCP connector) to B2 (owner-scoped cross-Task retrieval). This
+    # is a SEPARATE surface from the per-Task Chat tab below; feature-flag gated
+    # (CROSS_TASK_ASSISTANT_ENABLED) and synthetic-only.
+    from review_engine.app.assistant_view import render_assistant
+
+    render_assistant(svc, clients, client_label)
     st.stop()
 
 if not matter_id:
