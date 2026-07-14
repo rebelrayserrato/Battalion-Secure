@@ -67,6 +67,23 @@ ZIP_MAX_RATIO = _env_int("REVIEW_ENGINE_ZIP_MAX_RATIO", 100)
 MCP_CONNECTOR_ENABLED = _env_flag("MCP_CONNECTOR_ENABLED", False)
 MCP_FORCE_MOCK = _env_flag("MCP_MOCK", False)
 
+# --- Cross-Task owner-scoped assistant (RAYAAAA-247, Phase B2) ---
+# The "sees everything" personal-assistant surface reads ACROSS the owner's
+# Tasks (vs. today's single-Task Chat). It is an OWNER-INTERNAL capability and
+# is OFF by default. "Sees everything" == everything the OWNER is entitled to
+# see, NOT a tenant-isolation bypass: the retriever still enforces the
+# RAYAAAA-241/244/245 per-client isolation boundary structurally (an answer
+# framed around one Client can never reach another Client's documents).
+#
+# Two gates guard it (defense in depth, mirroring the matter-API posture):
+#   1. CROSS_TASK_ASSISTANT_ENABLED feature flag (OFF by default), and
+#   2. CROSS_TASK_ASSISTANT_TOKEN internal shared secret — when set, callers
+#      must present a matching token. Read from the environment only; never
+#      stored in source. Synthetic / owner-internal data only until the Phase 4
+#      gate (RAYAAAA-196/198).
+CROSS_TASK_ASSISTANT_ENABLED = _env_flag("CROSS_TASK_ASSISTANT_ENABLED", False)
+CROSS_TASK_ASSISTANT_TOKEN = os.getenv("CROSS_TASK_ASSISTANT_TOKEN")
+
 
 def ensure_directories() -> None:
     for path in (
