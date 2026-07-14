@@ -34,6 +34,14 @@ SAMPLES_DIR = DATA_DIR / "samples"
 # this scoping, not by post-filtering).
 POLICY_UPLOADS_DIR = DATA_DIR / "policy_uploads"
 POLICY_INDEXES_DIR = DATA_DIR / "policy_indexes"
+# RAYAAAA-251 (Phase C): a jurisdiction-scoped LAW reference corpus (statute /
+# regulation text uploaded from official government publishers, keyed by US
+# state or ``federal``). This is public-domain law, PII-free, and is kept in its
+# OWN directory trees keyed by JURISDICTION — never by client_id or matter_id —
+# so client-data erasure (fan-out + 90-day idle, which sweep only matter-keyed
+# stores) can never touch the law corpus. See ``review_engine/law``.
+LAW_UPLOADS_DIR = DATA_DIR / "law_uploads"
+LAW_INDEXES_DIR = DATA_DIR / "law_indexes"
 DATABASE_PATH = DATA_DIR / "review_engine.sqlite3"
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
@@ -78,5 +86,7 @@ def ensure_directories() -> None:
         SAMPLES_DIR,
         POLICY_UPLOADS_DIR,
         POLICY_INDEXES_DIR,
+        LAW_UPLOADS_DIR,
+        LAW_INDEXES_DIR,
     ):
         path.mkdir(parents=True, exist_ok=True)

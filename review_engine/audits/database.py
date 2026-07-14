@@ -78,6 +78,27 @@ class ReviewDatabase:
                     page INTEGER, row_number INTEGER, section TEXT, text TEXT NOT NULL,
                     FOREIGN KEY(client_id) REFERENCES clients(id)
                 );
+                -- RAYAAAA-251 (Phase C): jurisdiction-scoped law reference corpus.
+                -- Keyed by JURISDICTION (a US state code or 'federal') — NEVER by
+                -- client_id or matter_id — so it is physically separate from the
+                -- client policy/document corpus and is NOT touched by the
+                -- matter-keyed erasure fan-out / retention sweep (AC H). Public
+                -- law: one jurisdiction corpus is shared across all clients in
+                -- that state. Provenance (source name/URL, effective, retrieved)
+                -- is mandatory per document (AC B).
+                CREATE TABLE IF NOT EXISTS law_documents (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, jurisdiction TEXT NOT NULL,
+                    name TEXT NOT NULL, path TEXT NOT NULL, file_type TEXT NOT NULL,
+                    size INTEGER, uploaded_at TEXT NOT NULL, processed_at TEXT,
+                    source_name TEXT NOT NULL, source_url TEXT NOT NULL,
+                    effective TEXT NOT NULL, retrieved TEXT NOT NULL,
+                    UNIQUE(jurisdiction, name)
+                );
+                CREATE TABLE IF NOT EXISTS law_chunks (
+                    source_ref TEXT PRIMARY KEY, jurisdiction TEXT NOT NULL,
+                    document_name TEXT NOT NULL, file_type TEXT NOT NULL,
+                    page INTEGER, row_number INTEGER, section TEXT, text TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS entities (
                     id INTEGER PRIMARY KEY AUTOINCREMENT, matter_id TEXT NOT NULL,
                     entity_type TEXT NOT NULL, value TEXT NOT NULL, source_ref TEXT NOT NULL,
@@ -495,6 +516,129 @@ class ReviewDatabase:
                 (client_id, document_name),
             )
         self.log("policy_deleted", None, f"{client_id}/{document_name}")
+
+    # --- Jurisdiction-scoped law reference library (RAYAAAA-251, Phase C) ---
+    #
+    # Law documents/chunks are keyed by JURISDICTION (state code or 'federal'),
+    # not by client_id/matter_id, so they live entirely outside the client-data
+    # erasure surface. Provenance (source name/URL, effective, retrieved) is
+    # REQUIRED on every document — the service validates it before this write.
+    # Chunks reuse the SourceChunk shape where the ``matter_id`` field carries the
+    # *jurisdiction* (what was passed to ``extract_document`` and salts the ref).
+
+    def add_law_document(
+        self,
+        jurisdiction: str,
+        name: str,
+        path: Path,
+        *,
+        source_name: str,
+        source_url: str,
+        effective: str,
+        retrieved: str,
+    ) -> None:
+        with self.connect() as db:
+            db.execute(
+                """INSERT INTO law_documents(jurisdiction,name,path,file_type,size,uploaded_at,
+                       source_name,source_url,effective,retrieved)
+                   VALUES(?,?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT(jurisdiction,name) DO UPDATE SET
+                   path=excluded.path,size=excluded.size,uploaded_at=excluded.uploaded_at,
+                   source_name=excluded.source_name,source_url=excluded.source_url,
+                   effective=excluded.effective,retrieved=excluded.retrieved,
+                   processed_at=NULL""",
+                (
+                    jurisdiction, name, str(path), path.suffix.lower(),
+                    path.stat().st_size, self.now(),
+                    source_name, source_url, effective, retrieved,
+                ),
+            )
+        self.log("law_uploaded", None, f"{jurisdiction}: {name}")
+
+    def list_law_documents(self, jurisdiction: str) -> list[dict]:
+        with self.connect() as db:
+            return [
+                dict(row)
+                for row in db.execute(
+                    "SELECT * FROM law_documents WHERE jurisdiction=? ORDER BY name",
+                    (jurisdiction,),
+                )
+            ]
+
+    def list_law_jurisdictions(self) -> list[str]:
+        """Distinct jurisdictions that currently have any law document."""
+        with self.connect() as db:
+            return [
+                row[0]
+                for row in db.execute(
+                    "SELECT DISTINCT jurisdiction FROM law_documents ORDER BY jurisdiction"
+                )
+            ]
+
+    def law_provenance(self, jurisdiction: str) -> dict:
+        """Map document_name -> provenance dict for a jurisdiction's law docs."""
+        result: dict[str, dict] = {}
+        for row in self.list_law_documents(jurisdiction):
+            result[row["name"]] = {
+                "source_name": row["source_name"],
+                "source_url": row["source_url"],
+                "effective": row["effective"],
+                "retrieved": row["retrieved"],
+            }
+        return result
+
+    def replace_law_document_chunks(
+        self, jurisdiction: str, document_name: str, chunks: Iterable[SourceChunk]
+    ) -> None:
+        chunk_list = list(chunks)
+        with self.connect() as db:
+            db.execute(
+                "DELETE FROM law_chunks WHERE jurisdiction=? AND document_name=?",
+                (jurisdiction, document_name),
+            )
+            db.executemany(
+                """INSERT INTO law_chunks(source_ref,jurisdiction,document_name,file_type,page,row_number,section,text)
+                   VALUES(?,?,?,?,?,?,?,?)""",
+                [
+                    (
+                        c.source_ref, jurisdiction, c.document_name, c.file_type,
+                        c.page, c.row, c.section, c.text,
+                    )
+                    for c in chunk_list
+                ],
+            )
+            db.execute(
+                "UPDATE law_documents SET processed_at=? WHERE jurisdiction=? AND name=?",
+                (self.now(), jurisdiction, document_name),
+            )
+        self.log("law_processed", None, f"{jurisdiction}/{document_name}: {len(chunk_list)} chunks")
+
+    def get_law_chunks(self, jurisdiction: str) -> list[SourceChunk]:
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT * FROM law_chunks WHERE jurisdiction=? ORDER BY document_name,page,row_number",
+                (jurisdiction,),
+            )
+            return [
+                SourceChunk(
+                    matter_id=row["jurisdiction"], document_name=row["document_name"],
+                    file_type=row["file_type"], page=row["page"], row=row["row_number"],
+                    section=row["section"], text=row["text"], source_ref=row["source_ref"],
+                )
+                for row in rows
+            ]
+
+    def delete_law_document(self, jurisdiction: str, document_name: str) -> None:
+        with self.connect() as db:
+            db.execute(
+                "DELETE FROM law_chunks WHERE jurisdiction=? AND document_name=?",
+                (jurisdiction, document_name),
+            )
+            db.execute(
+                "DELETE FROM law_documents WHERE jurisdiction=? AND name=?",
+                (jurisdiction, document_name),
+            )
+        self.log("law_deleted", None, f"{jurisdiction}/{document_name}")
 
     def get_audit_log(self, matter_id: str) -> list[dict]:
         with self.connect() as db:
