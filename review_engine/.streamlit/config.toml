@@ -12,26 +12,35 @@ enableXsrfProtection = true
 [browser]
 gatherUsageStats = false     # no telemetry egress
 
-# RAYAAAA-227: brand the Review Engine so it reads as part of rayserrsolutions.com
-# instead of a stock Streamlit app. Palette lifted verbatim from the admin panel's
-# admin.css (AdminShell.tsx): --navy #1b2f5b sidebar, --bg #f7f8fc content, gold
-# accent #c8922a, --text #1a1f2e. This file is copied to /app/.streamlit in the
-# Dockerfile so Streamlit (CWD=/app) actually reads it; env vars only cover the
-# [server] keys above.
+# RAYAAAA-260: reskin the Review Engine to match the LIVE marketing site
+# (rayserrsolutions.com) and add a teal accent per the owner (RAYAAAA-191).
+# Palette lifted verbatim from the site's marketing.css design tokens:
+#   --navy #1b2f5b   --navy-light #2a4580   --bg #f7f8fc   --bg-alt #ffffff
+#   --gold #c8922a   --text #1a1f2e         --border #e4e9f0
+# The owner asked to "add teal" as the interactive accent; navy + teal + gold is
+# the resulting professional trio. Teal token (buttons / links / active states):
+#   --teal #2a9d8f   --teal-hover #238577   --teal-on-navy #4ac0b0
+# Headings use a serif face to mirror the site's Georgia serif headings (the
+# exact Georgia stack is pinned in main.py CSS). This file is copied to
+# /app/.streamlit in the Dockerfile so Streamlit (CWD=/app) reads it; env vars
+# only cover the [server] keys above.
 [theme]
 base = "light"
-primaryColor = "#1b2f5b"             # navy — matches the site's primary CTAs
-backgroundColor = "#f7f8fc"          # admin.css --bg (content area)
-secondaryBackgroundColor = "#ffffff" # admin.css --bg-alt (cards / widgets)
-textColor = "#1a1f2e"                # admin.css --text
-linkColor = "#2e7d9f"                # admin.css --accent
-font = "sans serif"
+primaryColor = "#2a9d8f"             # teal — buttons, active tab, active widgets
+backgroundColor = "#f7f8fc"          # marketing.css --bg (content area)
+secondaryBackgroundColor = "#ffffff" # marketing.css --bg-alt (cards / widgets)
+textColor = "#1a1f2e"                # marketing.css --text
+linkColor = "#2a9d8f"                # teal links (the requested accent)
+borderColor = "#e4e9f0"              # marketing.css --border (widget outlines)
+font = "sans serif"                  # body: system sans, mirrors the site body
+headingFont = "serif"                # headings: serif, mirrors Georgia headings
 
 [theme.sidebar]
-backgroundColor = "#1b2f5b"          # navy sidebar, mirrors AdminShell .adm-sidebar
-secondaryBackgroundColor = "#2a4580" # admin.css --navy-light (sidebar widgets)
+backgroundColor = "#1b2f5b"          # navy sidebar, mirrors the site header/nav
+secondaryBackgroundColor = "#2a4580" # marketing.css --navy-light (sidebar widgets)
 textColor = "#ffffff"
-primaryColor = "#c8922a"             # gold accent, mirrors the active-nav indicator
+primaryColor = "#2a9d8f"             # teal active-nav indicator (requested accent)
+linkColor = "#4ac0b0"                # lighter teal for legible links on navy
 
 [client]
 # Hide Streamlit's dev/hamburger toolbar so the RAYSERR brand isn't sharing the
