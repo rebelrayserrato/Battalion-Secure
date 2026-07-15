@@ -30,17 +30,67 @@ st.set_page_config(
     layout="wide",
 )
 
-# RAYAAAA-227: brand the page as part of rayserrsolutions.com. The theme (navy
-# sidebar / light content) comes from .streamlit/config.toml; this hides the
-# leftover Streamlit chrome (default footer + deploy badge) so only the RAYSERR
-# brand shows. The colour palette matches the admin panel's admin.css.
+# RAYAAAA-260: reskin to match the live marketing site (rayserrsolutions.com) and
+# add a teal accent (owner ask, RAYAAAA-191). The core palette (navy sidebar /
+# #f7f8fc content / teal primary) is set in .streamlit/config.toml; this block
+# (a) hides leftover Streamlit chrome so only the RAYSERR brand shows, and
+# (b) pins the site's exact look the theme keys can't reach: Georgia serif
+# headings, the teal accent on buttons/links/active states, and the marketing
+# site's soft card border+shadow. Tokens mirror marketing.css verbatim.
 st.markdown(
     """
     <style>
+      /* --- RAYSERR brand tokens (marketing.css) + teal accent (RAYAAAA-260) --- */
+      :root {
+        --rs-navy: #1b2f5b;
+        --rs-teal: #2a9d8f;
+        --rs-teal-hover: #238577;
+        --rs-border: #e4e9f0;
+        --rs-shadow: 0 1px 6px rgba(27, 47, 91, 0.07);
+        --rs-shadow-md: 0 4px 20px rgba(27, 47, 91, 0.11);
+      }
+
+      /* Hide leftover Streamlit chrome so only the RAYSERR brand shows. */
       footer {visibility: hidden;}
       div[data-testid="stDecoration"] {display: none;}
       a[href^="https://streamlit.io"], a[href^="https://share.streamlit.io"],
       div[data-testid="stStatusWidget"] {display: none !important;}
+
+      /* Headings: Georgia serif to mirror rayserrsolutions.com hero/section
+         headings (marketing.css uses Georgia serif, weight 400). */
+      [data-testid="stHeading"] h1,
+      [data-testid="stHeading"] h2,
+      [data-testid="stHeading"] h3,
+      .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
+        font-family: Georgia, "Times New Roman", serif !important;
+        font-weight: 400 !important;
+        color: var(--rs-navy);
+        letter-spacing: 0.1px;
+      }
+
+      /* Primary buttons + the teal accent on hover for all buttons. */
+      .stButton > button:hover,
+      .stDownloadButton > button:hover,
+      .stFormSubmitButton > button:hover {
+        border-color: var(--rs-teal) !important;
+        color: var(--rs-teal) !important;
+      }
+      button[kind="primary"], button[data-testid="baseButton-primary"] {
+        background: var(--rs-teal) !important;
+        border-color: var(--rs-teal) !important;
+      }
+      button[kind="primary"]:hover,
+      button[data-testid="baseButton-primary"]:hover {
+        background: var(--rs-teal-hover) !important;
+        border-color: var(--rs-teal-hover) !important;
+      }
+
+      /* Bordered containers / expanders read as the site's soft cards. */
+      div[data-testid="stExpander"] > details,
+      div[data-testid="stVerticalBlockBorderWrapper"] {
+        border-color: var(--rs-border) !important;
+        box-shadow: var(--rs-shadow);
+      }
     </style>
     """,
     unsafe_allow_html=True,
@@ -65,7 +115,7 @@ with st.sidebar:
     # this is a plain outbound link, the auth proxy / PII gate are untouched).
     st.markdown(
         "<a href='https://rayserrsolutions.com/admin' target='_top' "
-        "style='display:inline-block;margin-bottom:0.75rem;color:#c8922a;"
+        "style='display:inline-block;margin-bottom:0.75rem;color:#4ac0b0;"
         "font-weight:600;text-decoration:none;font-size:0.85rem;'>"
         "← Back to RAYSERR Admin</a>",
         unsafe_allow_html=True,

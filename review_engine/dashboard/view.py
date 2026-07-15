@@ -22,13 +22,15 @@ from review_engine.dashboard.aggregation import (
     source_refs,
 )
 
-# Colour-blind-safe severity palette (hue + lightness separation).
+# Colour-blind-safe severity palette (hue + lightness separation). Severity keeps
+# its semantic red/amber/blue ramp so risk is never signalled by brand colour.
 SEVERITY_COLORS = {
     "High": "#B42318",
     "Medium": "#B54708",
     "Low": "#175CD3",
 }
-_CATEGORY_COLOR = "#175CD3"
+# Neutral (non-severity) category bars use the RAYSERR teal accent (RAYAAAA-260).
+_CATEGORY_COLOR = "#2a9d8f"
 
 
 def _severity_scale():
