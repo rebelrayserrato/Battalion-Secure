@@ -70,6 +70,12 @@ with st.sidebar:
         "← Back to RAYSERR Admin</a>",
         unsafe_allow_html=True,
     )
+    # RAYAAAA-259: the always-here floating "personal assistant" widget. Rendered
+    # at the top of the sidebar so it is present on EVERY view (independent of any
+    # single Task), backed by the LOCAL model (RAYAAAA-258). Flag-gated inside.
+    from review_engine.app.floating_assistant_view import render_floating_assistant
+
+    render_floating_assistant(svc)
     notice = st.session_state.pop("_deleted_notice", None)
     if notice:
         st.success(notice)
@@ -80,14 +86,13 @@ with st.sidebar:
             "Client policy library",
             "Law reference library",
             "Cross-Task risk dashboard",
-            "Cross-Task assistant",
         ],
         help=(
             "The workspace reviews one Task; the policy library manages a "
             "Client's own policy corpus; the law reference library manages the "
             "per-jurisdiction statute/regulation corpus; the dashboard "
-            "aggregates risk across all Tasks; the assistant answers questions "
-            "ACROSS all your Tasks with your choice of model."
+            "aggregates risk across all Tasks. The floating assistant above "
+            "answers questions ACROSS all your Tasks, grounded in your evidence."
         ),
     )
     # RAYAAAA-244: Clients are first-class. A Task belongs to exactly one Client,
@@ -346,15 +351,12 @@ if view_mode == "Cross-Task risk dashboard":
     render_dashboard(svc)
     st.stop()
 
-if view_mode == "Cross-Task assistant":
-    # RAYAAAA-248 (Phase B3): the non-Task-scoped "personal assistant" — wires B1
-    # (multi-model MCP connector) to B2 (owner-scoped cross-Task retrieval). This
-    # is a SEPARATE surface from the per-Task Chat tab below; feature-flag gated
-    # (CROSS_TASK_ASSISTANT_ENABLED) and synthetic-only.
-    from review_engine.app.assistant_view import render_assistant
-
-    render_assistant(svc, clients, client_label)
-    st.stop()
+# RAYAAAA-259: the cross-Task "personal assistant" is now the always-here floating
+# widget rendered from the sidebar (render_floating_assistant, above) on every
+# view, backed by the LOCAL model (RAYAAAA-258). It replaces the RAYAAAA-248
+# full-page multi-model view, whose external MCP routing/compare path the owner
+# cancelled (RAYAAAA-191 ix 959e5ca8; RAYAAAA-242 CANCELLED). The 248 modules
+# (assistant_view / cross_task_chat) are left in-tree but no longer UI-wired.
 
 if not matter_id:
     st.info("Create or select a task to begin.")
