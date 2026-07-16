@@ -1,8 +1,31 @@
 from __future__ import annotations
 
 import json
+import os
 from urllib.error import URLError
 from urllib.request import Request, urlopen
+
+# RAYAAAA-258: on-box Ollama endpoint + model, resolved from the environment so the
+# same code works in local dev (default 127.0.0.1 loopback — where nothing listens,
+# so the connector is inert) and in the sealed VPS stack, where the compose service
+# sets OLLAMA_BASE_URL=http://ollama:11434 (127.0.0.1 inside the review-engine
+# container is NOT the ollama host — it is a separate sealed container on the
+# internal net). Defaults preserve the pre-258 behaviour when the vars are unset.
+DEFAULT_OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+DEFAULT_OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
+
+
+def local_assistant_enabled() -> bool:
+    """RAYAAAA-258 feature flag for the local-LLM personal-assistant brain.
+
+    OFF by default. The local model is hosted (Ollama + hermes3:3b) and the connector
+    is wired to it, but the assistant surface (sibling issue) must not call the model
+    until this flips to "1" — mirrors the MCP connector's MCP_CONNECTOR_ENABLED gate.
+    Because the model runs on-box with no external egress, no provider DPA / Ch.V
+    legal gate is required (RAYAAAA-191 local-model choice).
+    """
+    return os.getenv("LOCAL_ASSISTANT_ENABLED", "0") == "1"
+
 
 # RAYAAAA-232: fixed reply when there is nothing to ground an answer in. Kept as a
 # constant so both the connector and the app-layer RAG service return the same
@@ -42,9 +65,13 @@ def build_grounded_prompt(question: str, contexts: list[dict]) -> str:
 
 
 class OllamaConnector:
-    def __init__(self, model: str = "llama3.2", base_url: str = "http://127.0.0.1:11434"):
-        self.model = model
-        self.base_url = base_url.rstrip("/")
+    def __init__(self, model: str | None = None, base_url: str | None = None):
+        # RAYAAAA-258: fall back to the env-resolved endpoint/model so the same
+        # callers work unchanged locally (127.0.0.1 loopback) and in the sealed VPS
+        # stack (OLLAMA_BASE_URL=http://ollama:11434, OLLAMA_MODEL=hermes3:3b),
+        # without editing any of the existing OllamaConnector() call sites.
+        self.model = model or DEFAULT_OLLAMA_MODEL
+        self.base_url = (base_url or DEFAULT_OLLAMA_BASE_URL).rstrip("/")
 
     def available(self) -> bool:
         try:
