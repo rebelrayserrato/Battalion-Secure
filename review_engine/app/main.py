@@ -4,6 +4,8 @@ import streamlit as st
 
 from review_engine.app.policy_audit import PolicyAuditor
 from review_engine.app.retrieval import GroundedAnswerer, make_client_scoped_retriever
+from review_engine.app.new_request import render_new_request
+from review_engine.app.policy_library_view import render_policy_library
 from review_engine.app.services import ReviewService
 from review_engine.clients.jurisdictions import (
     JURISDICTION_CHOICES,
@@ -132,6 +134,7 @@ with st.sidebar:
     view_mode = st.radio(
         "View",
         [
+            "New Request",
             "Task workspace",
             "Client policy library",
             "Law reference library",
@@ -211,77 +214,21 @@ with st.sidebar:
                     else:
                         st.error("Task name is required.")
 
+if view_mode == "New Request":
+    # RAYAAAA-264: the base44-style two-step "New Review Request" wizard. Review
+    # "types" are presets over the EXISTING pipeline (see new_request.py) — no
+    # new engine, no egress. A submission creates a Task under a selected Client.
+    render_new_request(svc, clients, client_label)
+    st.stop()
+
 if view_mode == "Client policy library":
-    # RAYAAAA-245 (Phase B): manage a Client's own uploaded HR/company policy
-    # corpus. Uploaded ONCE per Client and indexed apart from any Task's docs;
-    # a Task's Chat / policy-audit retrieval then composes the Task index with
-    # ONLY its linked client's policy library (never another client's).
-    st.subheader("Client policy library")
-    st.caption(
-        "Upload each Client's own HR/company policies once. They are stored and "
-        "indexed separately from any Task's documents, and a Task's Chat and "
-        "before-you-sign review pull from the Task's docs plus ONLY this "
-        "Client's policies. Synthetic / owner-internal data only."
-    )
-    if not clients:
-        st.info("Create a client in the sidebar first — the policy library is per-client.")
-        st.stop()
-    lib_client = st.selectbox(
-        "Client",
-        options=[c["id"] for c in clients],
-        format_func=lambda cid: client_label.get(cid, cid),
-        key="policy_lib_client",
-    )
-    policy_uploads = st.file_uploader(
-        "Upload policy documents",
-        type=["pdf", "docx", "txt", "csv", "xlsx", "png", "jpg", "jpeg", "zip"],
-        accept_multiple_files=True,
-        key="policy_uploader",
-        help="Stored under this client's local policy library; not sent for model training.",
-    )
-    if st.button("Save policy files", disabled=not policy_uploads, key="policy_save"):
-        for uploaded in policy_uploads:
-            svc.save_policy_upload(lib_client, uploaded.name, uploaded.getvalue())
-        st.success(f"Saved {len(policy_uploads)} policy file(s).")
-        st.rerun()
-    policy_docs = svc.db.list_policy_documents(lib_client)
-    if policy_docs:
-        st.dataframe(
-            [
-                {
-                    "Policy document": item["name"],
-                    "Type": item["file_type"],
-                    "Bytes": item["size"],
-                    "Indexed": item["processed_at"] or "No",
-                }
-                for item in policy_docs
-            ],
-            use_container_width=True,
-            hide_index=True,
-        )
-        col_proc, col_del = st.columns(2)
-        with col_proc:
-            if st.button("Process policy library", type="primary", key="policy_process"):
-                with st.spinner("Extracting and indexing this client's policies…"):
-                    result = svc.process_policy_library(lib_client)
-                if result["errors"]:
-                    st.warning("\n".join(result["errors"]))
-                st.success(
-                    f"Indexed {result['processed']} policy document(s) into "
-                    f"{result['chunks']} source chunks."
-                )
-        with col_del:
-            to_delete = st.selectbox(
-                "Remove a policy document",
-                options=["—"] + [d["name"] for d in policy_docs],
-                key="policy_delete_pick",
-            )
-            if st.button("Delete selected policy", disabled=to_delete == "—", key="policy_delete"):
-                svc.delete_policy_document(lib_client, to_delete)
-                st.success(f"Removed {to_delete} from the policy library.")
-                st.rerun()
-    else:
-        st.info("No policy documents uploaded for this client yet.")
+    # RAYAAAA-264: the redesigned per-client Policy Library page (base44 'Aich-R'
+    # flow). Renders the type tabs + category chips + search + Add-Skill / local
+    # AI-Search modals, all wired to the EXISTING per-client policy library
+    # (RAYAAAA-245) and jurisdiction law library (RAYAAAA-251) with their hard
+    # isolation intact — see policy_library_view.py. The RAYAAAA-245 bulk-upload
+    # / re-index flow is preserved inside the page (nothing removed).
+    render_policy_library(svc, clients, client_label)
     st.stop()
 
 if view_mode == "Law reference library":
