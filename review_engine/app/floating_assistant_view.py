@@ -31,27 +31,44 @@ from review_engine.app.cross_task import CrossTaskAccessError, assistant_enabled
 from review_engine.app.local_assistant import FloatingAssistant
 from review_engine.clients.jurisdictions import state_label
 
-# The owner's demo label for the floating widget.
-_WIDGET_LABEL = "💬  Aich-R Assistant · Always here"
+# The owner's demo shows a teal circular "chat" FAB at the bottom-right; the
+# closed popover trigger is that FAB (just the icon — main.py CSS makes it round
+# and pins it bottom-right). The panel's own teal-gradient header carries the
+# "Aich-R Assistant · AI-powered · Always here" label from the demo.
+_WIDGET_LABEL = "💬"
 # Session key holding the last reply so it persists across the popover's reruns.
 _REPLY_KEY = "_floating_assistant_reply"
 
 
 def render_floating_assistant(svc) -> None:
-    """Render the always-here assistant as a sidebar popover on every view.
+    """Render the always-here assistant as a bottom-right floating panel.
 
-    Placed at the top of the sidebar by ``main.py`` so it is present regardless of
-    which ``view_mode`` is active — the "independent of any single Task" surface
-    the owner asked for."""
-    with st.sidebar:
-        # ``st.popover`` (Streamlit >=1.31; requirement pins >=1.35) gives a
-        # button that opens a floating panel in place — the closest native
-        # equivalent to the demo's "always here" widget.
-        with st.popover(_WIDGET_LABEL, use_container_width=True):
-            _render_panel(svc)
+    RAYAAAA-263: repositioned from the sidebar popover to the demo's bottom-right
+    floating panel (``main.py`` CSS fixes the ``stPopover`` container to the
+    bottom-right and rounds the trigger into a teal FAB). It is rendered once from
+    ``main.py`` OUTSIDE any view branch so it is present on every view — the
+    "always here", independent-of-any-single-Task surface the owner asked for. The
+    brain, gating, retrieval, isolation and disclaimer are unchanged (RAYAAAA-259/
+    247/258); only placement + skin changed."""
+    # ``st.popover`` (Streamlit >=1.31; requirement pins >=1.35) gives a button
+    # that opens a floating panel in place — the closest native equivalent to the
+    # demo's "always here" widget.
+    with st.popover(_WIDGET_LABEL, use_container_width=False):
+        _render_panel(svc)
 
 
 def _render_panel(svc) -> None:
+    # Demo's teal-gradient header. Purely presentational; the label matches the
+    # owner's "Aich-R Assistant · AI-powered · Always here" widget chrome.
+    st.markdown(
+        "<div class='aichr-assistant-header'>"
+        "<span class='aichr-assistant-badge'>\U0001f4bc</span>"
+        "<span class='aichr-assistant-titles'>"
+        "<span class='aichr-assistant-name'>Aich-R Assistant</span>"
+        "<span class='aichr-assistant-sub'>AI-powered · Always here</span>"
+        "</span></div>",
+        unsafe_allow_html=True,
+    )
     st.markdown("**Ask me anything — across all your Tasks**")
     st.caption(
         "I see across every Task, client and policy you own (not one Task at a "
@@ -94,7 +111,7 @@ def _render_panel(svc) -> None:
     question = st.text_input(
         "Your question",
         key="floating_assistant_question",
-        placeholder="e.g. Which Tasks mention overtime disputes?",
+        placeholder="Ask me anything...",
     )
 
     if st.button(
