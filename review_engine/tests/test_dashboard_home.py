@@ -116,13 +116,15 @@ def test_review_types_catalogue_shape():
     # The six demo review types, stable keys, and a working by-key index.
     assert len(REVIEW_TYPES) == 6
     keys = [rt.key for rt in REVIEW_TYPES]
+    # Keys are kept identical to the sibling RAYAAAA-264 New Request wizard presets
+    # so a dashboard card can prefilter the wizard via st.session_state["nr_type"].
     assert keys == [
         "legal_case",
         "hr_termination",
         "contract",
-        "compliance",
-        "incident",
-        "general",
+        "compliance_audit",
+        "incident_misconduct",
+        "general_document",
     ]
     assert REVIEW_TYPES_BY_KEY["contract"].title == "Contract Review"
     # every type has an icon + hex colour for its chip

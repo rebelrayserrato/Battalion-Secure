@@ -35,10 +35,15 @@ _STATUS_LABELS = {
 
 
 def _go(nav: str, review_type: str | None = None) -> None:
-    """Router helper: set the active view (and optional review-type prefilter)."""
+    """Router helper: set the active view (and optional review-type prefilter).
+
+    The prefilter is written to ``nr_type`` — the exact session key the New Request
+    wizard (sibling RAYAAAA-264) reads — so a "Start a Review" card lands the
+    wizard prefiltered to that type once both branches are merged.
+    """
     st.session_state["nav"] = nav
     if review_type is not None:
-        st.session_state["new_request_type"] = review_type
+        st.session_state["nr_type"] = review_type
     st.rerun()
 
 

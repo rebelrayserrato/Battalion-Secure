@@ -304,7 +304,10 @@ def _render_new_request(svc) -> None:
         unsafe_allow_html=True,
     )
     keys = [rt.key for rt in REVIEW_TYPES]
-    pre = st.session_state.get("new_request_type")
+    # ``nr_type`` is the shared prefilter key set by the dashboard "Start a Review"
+    # cards and read by the sibling RAYAAAA-264 wizard (which replaces this
+    # placeholder on merge). Keep the name aligned so the prefilter survives.
+    pre = st.session_state.get("nr_type")
     default_idx = keys.index(pre) if pre in keys else 0
     picked_type = st.selectbox(
         "Review type",
@@ -350,7 +353,7 @@ def _render_new_request(svc) -> None:
                 )
                 st.session_state["active_matter_id"] = created
                 st.session_state["nav"] = "my_requests"
-                st.session_state.pop("new_request_type", None)
+                st.session_state.pop("nr_type", None)
                 st.success(f"Created {created}.")
                 st.rerun()
             else:
