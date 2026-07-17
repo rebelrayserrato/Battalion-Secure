@@ -3,24 +3,40 @@
 Uses Streamlit's AppTest to run the real app script with a live ScriptRunContext
 (unlike a bare import) and asserts the New Request wizard and Policy Library page
 render without raising. Local-only; no browser needed.
+
+RAYAAAA-263: the app shell replaced the sidebar "View" radio with session-state
+button nav, so navigation here clicks the sidebar nav button by key instead of
+setting a radio.
 """
 from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from streamlit.testing.v1 import AppTest
 
 APP = str(Path(__file__).resolve().parents[1] / "app" / "main.py")
+
+# Map the legacy view names these tests were written against to the new nav keys.
+_NAV_KEY = {
+    "New Request": "nav_new_request",
+    "Client policy library": "nav_policy_library",
+}
+
+
+def _goto(at: AppTest, view: str) -> AppTest:
+    nav_key = _NAV_KEY.get(view, view)
+    for b in at.button:
+        if b.key == nav_key:
+            b.click().run()
+            return at
+    raise AssertionError(f"nav button {nav_key!r} for view {view!r} not found")
 
 
 def _run(view: str) -> AppTest:
     at = AppTest.from_file(APP, default_timeout=30)
     at.run()
     assert not at.exception, at.exception
-    # The first radio is the sidebar "View" selector.
-    at.radio[0].set_value(view).run()
+    _goto(at, view)
     return at
 
 
@@ -45,7 +61,7 @@ def test_policy_library_renders():
 def test_new_request_select_type_advances_cta(monkeypatch):
     at = AppTest.from_file(APP, default_timeout=30)
     at.run()
-    at.radio[0].set_value("New Request").run()
+    _goto(at, "New Request")
     # Click the first "Select" -> the CTA becomes "Continue with Legal Case Analysis".
     for b in at.button:
         if b.label == "Select":
