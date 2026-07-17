@@ -2,6 +2,19 @@
 from __future__ import annotations
 
 from review_engine.app import new_request as nr
+from review_engine.app import review_types as rt_catalog
+
+
+def test_wizard_shares_the_263_catalogue_keys_and_titles():
+    # The wizard must stay key/title/icon-synced with the shared catalogue that
+    # the RAYAAAA-263 Dashboard cards use, so the nr_type prefilter always lands.
+    cat = {c.key: c for c in rt_catalog.REVIEW_TYPES}
+    wiz = {r.key: r for r in nr.REVIEW_TYPES}
+    assert list(wiz) == list(cat)  # same order + keys
+    for key, r in wiz.items():
+        assert r.title == cat[key].title
+        assert r.icon == cat[key].icon
+        assert r.accent == cat[key].color
 
 
 def test_six_review_types_with_stable_keys():
@@ -83,6 +96,8 @@ def test_run_submission_drives_existing_pipeline(monkeypatch):
     rt = nr.review_type("general_document")
     svc = _FakeSvc()
     out = nr._run_submission(svc, "MAT-1", rt, question="")
+    # _run_submission drives the existing pipeline (process + run_reviews), never
+    # a forked backend.
     assert svc.calls["process"] == "MAT-1"
     assert svc.calls["run_reviews"] == (True, True)
     assert out["chunks"] == 3

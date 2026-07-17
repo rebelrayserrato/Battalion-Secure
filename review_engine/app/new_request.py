@@ -26,12 +26,22 @@ import streamlit as st
 
 from review_engine.app.policy_audit import DEFAULT_CHECKLIST, PolicyAuditor, checklist_from_policies
 from review_engine.app.retrieval import GroundedAnswerer, make_client_scoped_retriever
+from review_engine.app.review_types import REVIEW_TYPES as _CATALOG, REVIEW_TYPES_BY_KEY as _CATALOG_BY_KEY
 from review_engine.clients.jurisdictions import UNSPECIFIED_STATE, state_label
 
 
 @dataclass(frozen=True)
 class ReviewType:
-    """A New-Request preset that maps onto the existing review pipeline."""
+    """A New-Request preset that maps onto the existing review pipeline.
+
+    Title / icon / accent come from the SHARED catalogue
+    (``review_engine.app.review_types``) that the RAYAAAA-263 Dashboard "Start a
+    Review" cards also use, so the wizard and the dashboard never diverge and a
+    dashboard card's ``nr_type`` prefilter always lands a matching wizard card.
+    This module only adds the wizard-specific copy (longer description, the
+    feature-tag chips) and the pipeline flags that select which EXISTING local
+    capabilities run on submit.
+    """
 
     key: str
     title: str
@@ -46,129 +56,93 @@ class ReviewType:
     law_grounded: bool = False
 
 
-# The six review types from the owner's reference screens (RAYAAAA-191
-# attachments). Order + copy + chips mirror the base44 demo; the pipeline flags
-# map each onto the existing local review capabilities (no new backend).
-REVIEW_TYPES: tuple[ReviewType, ...] = (
-    ReviewType(
-        key="legal_case",
-        title="Legal Case Analysis",
-        icon="⚖️",
-        accent="#3b82f6",
+# Wizard-only extension of the shared catalogue, keyed by the SAME keys: the long
+# description + feature-tag chips + the pipeline flags mapping each type onto the
+# existing local review capabilities (no new backend).
+_PRESETS: dict[str, dict] = {
+    "legal_case": dict(
         description=(
             "Full paralegal-style case analysis: timelines, parties involved, "
             "key facts, legal issues, and research."
         ),
         features=(
-            "Case file review",
-            "Build case timelines",
-            "Identify all parties",
-            "Key facts extraction",
-            "Legal issue spotting",
+            "Case file review", "Build case timelines", "Identify all parties",
+            "Key facts extraction", "Legal issue spotting",
         ),
-        include_hr=True,
-        include_fraud=True,
+        include_hr=True, include_fraud=True,
     ),
-    ReviewType(
-        key="hr_termination",
-        title="HR & Termination Review",
-        icon="\U0001f465",
-        accent="#d9a441",
+    "hr_termination": dict(
         description=(
             "Verify termination documents meet company policy, state/federal "
             "law, and flag employment risks."
         ),
         features=(
-            "Termination letter compliance",
-            "Policy violation check",
-            "WARN Act screening",
-            "Final pay review",
-            "Retaliation risk",
+            "Termination letter compliance", "Policy violation check",
+            "WARN Act screening", "Final pay review", "Retaliation risk",
         ),
-        include_hr=True,
-        include_fraud=False,
-        run_policy_audit=True,
-        law_grounded=True,
+        include_hr=True, include_fraud=False, run_policy_audit=True, law_grounded=True,
     ),
-    ReviewType(
-        key="contract",
-        title="Contract Review",
-        icon="\U0001f58a️",
-        accent="#8b5cf6",
+    "contract": dict(
         description=(
             "Identify unfavorable clauses, missing protections, liability "
             "exposure, and negotiation points."
         ),
         features=(
-            "Vendor contracts",
-            "Employment agreements",
-            "NDAs",
-            "Liability exposure",
-            "Negotiation points",
+            "Vendor contracts", "Employment agreements", "NDAs",
+            "Liability exposure", "Negotiation points",
         ),
-        include_hr=False,
-        include_fraud=False,
-        run_policy_audit=True,
+        include_hr=False, include_fraud=False, run_policy_audit=True,
     ),
-    ReviewType(
-        key="compliance_audit",
-        title="Compliance Audit",
-        icon="\U0001f4cb",
-        accent="#2a9d8f",
+    "compliance_audit": dict(
         description=(
             "Audit documents against regulatory frameworks: OSHA, HIPAA, SOX, "
             "GDPR, and more."
         ),
         features=(
-            "HIPAA compliance",
-            "OSHA safety audits",
-            "GDPR data review",
-            "SOX controls",
-            "Framework mapping",
+            "HIPAA compliance", "OSHA safety audits", "GDPR data review",
+            "SOX controls", "Framework mapping",
         ),
-        include_hr=True,
-        include_fraud=False,
-        run_policy_audit=True,
-        law_grounded=True,
+        include_hr=True, include_fraud=False, run_policy_audit=True, law_grounded=True,
     ),
-    ReviewType(
-        key="incident_misconduct",
-        title="Incident & Misconduct Review",
-        icon="⚠️",
-        accent="#ef4444",
+    "incident_misconduct": dict(
         description=(
             "Investigate incident reports, identify misconduct patterns, assess "
             "liability, and document findings."
         ),
         features=(
-            "Workplace incidents",
-            "Harassment complaints",
-            "Safety violations",
-            "Liability assessment",
-            "Findings documentation",
+            "Workplace incidents", "Harassment complaints", "Safety violations",
+            "Liability assessment", "Findings documentation",
         ),
-        include_hr=True,
-        include_fraud=True,
+        include_hr=True, include_fraud=True,
     ),
-    ReviewType(
-        key="general_document",
-        title="General Document Review",
-        icon="\U0001f4c4",
-        accent="#64748b",
+    "general_document": dict(
         description=(
             "All-purpose document analysis with policy matching, fraud "
             "detection, and key insight extraction."
         ),
         features=(
-            "Policy Q&A",
-            "Document summarization",
-            "Risk identification",
+            "Policy Q&A", "Document summarization", "Risk identification",
             "Key insight extraction",
         ),
-        include_hr=True,
-        include_fraud=True,
+        include_hr=True, include_fraud=True,
     ),
-)
+}
+
+
+def _build_types() -> tuple[ReviewType, ...]:
+    """Compose the shared catalogue (order/key/title/icon/color) with the
+    wizard presets. Fails loudly if the two ever drift out of key-sync."""
+    out = []
+    for cat in _CATALOG:
+        preset = dict(_PRESETS[cat.key])  # KeyError here = catalogue/preset drift
+        preset["features"] = tuple(preset["features"])
+        out.append(
+            ReviewType(key=cat.key, title=cat.title, icon=cat.icon, accent=cat.color, **preset)
+        )
+    return tuple(out)
+
+
+REVIEW_TYPES: tuple[ReviewType, ...] = _build_types()
 
 _BY_KEY = {rt.key: rt for rt in REVIEW_TYPES}
 
@@ -384,12 +358,21 @@ def _render_step_two(svc, rt: ReviewType, clients: list[dict], client_label: dic
             st.error("A request name is required.")
             return
         with st.spinner("Creating the request, indexing evidence, and running the review…"):
-            matter_id = svc.db.create_matter(task_name.strip(), client_id=picked_client)
+            # Stamp the review type into the matter description, matching the
+            # RAYAAAA-263 shell's create convention so "My Requests" shows it.
+            matter_id = svc.db.create_matter(
+                task_name.strip(),
+                description=f"Review type: {rt.title}",
+                client_id=picked_client,
+            )
             if upload is not None:
                 svc.save_upload(matter_id, upload.name, upload.getvalue())
             svc.db.log("new_request_submitted", matter_id, f"type={rt.key}")
             outcome = _run_submission(svc, matter_id, rt, question or "")
         st.session_state["nr_last_result"] = {"matter_id": matter_id, "type": rt.key, "outcome": outcome}
+        # Make the new request the active one so the RAYAAAA-263 shell's
+        # "My Requests"/Task workspace opens straight to it.
+        st.session_state["active_matter_id"] = matter_id
         st.rerun()
 
     _render_result(svc, rt)
