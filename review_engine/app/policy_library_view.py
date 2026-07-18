@@ -202,9 +202,9 @@ def render_policy_library(svc, clients: list[dict], client_label: dict) -> None:
     with head_r:
         st.write("")
         b1, b2 = st.columns(2)
-        if b1.button("✨ AI Search", use_container_width=True, key="pl_ai_search_btn"):
+        if b1.button("AI Search", use_container_width=True, key="pl_ai_search_btn"):
             _ai_search_dialog(svc, lib_client, law_jurs)
-        if b2.button("➕ Add Skill", type="primary", use_container_width=True, key="pl_add_skill_btn"):
+        if b2.button("Add Skill", type="primary", use_container_width=True, key="pl_add_skill_btn"):
             _add_skill_dialog(svc, lib_client, client_state, law_jurs)
 
     # --- Load the corpus (policy docs + client-jurisdiction law docs) --------

@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 
 import streamlit as st
 
+from review_engine.app.icons import icon as ui_icon
 from review_engine.app.policy_audit import DEFAULT_CHECKLIST, PolicyAuditor, checklist_from_policies
 from review_engine.app.retrieval import GroundedAnswerer, make_client_scoped_retriever
 from review_engine.app.review_types import REVIEW_TYPES as _CATALOG, REVIEW_TYPES_BY_KEY as _CATALOG_BY_KEY
@@ -45,7 +46,7 @@ class ReviewType:
 
     key: str
     title: str
-    icon: str  # emoji, shown in the card's coloured tile
+    icon: str  # emoji-free glyph name (see review_engine.app.icons)
     accent: str  # hex, tints the tile + chips
     description: str
     features: tuple[str, ...]  # feature-tag chips
@@ -172,7 +173,7 @@ def _stepper_html(step: int) -> str:
         done = step > n
         active = step == n
         cls = "done" if done else ("active" if active else "idle")
-        mark = "✓" if done else str(n)
+        mark = ui_icon("check", 14) if done else str(n)
         return (
             f"<div class='nr-step {cls}'>"
             f"<span class='nr-step-dot'>{mark}</span>"
@@ -225,11 +226,11 @@ def _render_card(rt: ReviewType, selected: bool) -> None:
     """One selectable review-type card."""
     with st.container(border=True):
         marker = "<span class='nr-card-selected'></span>" if selected else ""
-        flag = "<span class='nr-selected-flag'>✓ Selected</span>" if selected else ""
+        flag = "<span class='nr-selected-flag'>Selected</span>" if selected else ""
         st.markdown(
             f"{marker}"
             "<div class='nr-card'><div class='nr-card-head'>"
-            f"<div class='nr-tile' style='background:{rt.accent}1a;'>{rt.icon}</div>"
+            f"<div class='nr-tile' style='background:{rt.accent}1a;'>{ui_icon(rt.icon, 22)}</div>"
             "<div><div class='nr-card-title'>"
             f"{html.escape(rt.title)} {flag}</div>"
             f"<div class='nr-card-desc'>{html.escape(rt.description)}</div>"
@@ -237,7 +238,7 @@ def _render_card(rt: ReviewType, selected: bool) -> None:
             f"{_chips_html(rt)}</div>",
             unsafe_allow_html=True,
         )
-        label = "✓ Selected" if selected else "Select"
+        label = "Selected" if selected else "Select"
         if st.button(
             label,
             key=f"nr_pick_{rt.key}",
@@ -334,7 +335,7 @@ def _render_step_two(svc, rt: ReviewType, clients: list[dict], client_label: dic
     default_name = f"{rt.title}"
     task_name = st.text_input("Request name", value=default_name, key="nr_task_name")
 
-    st.markdown("##### \U0001f4e4 Upload Document  *(optional)*")
+    st.markdown("##### Upload Document  *(optional)*")
     upload = st.file_uploader(
         "Drop your document here or click to browse",
         type=["pdf", "docx", "txt", "csv", "xlsx", "png", "jpg", "jpeg", "zip"],
@@ -344,7 +345,7 @@ def _render_step_two(svc, rt: ReviewType, clients: list[dict], client_label: dic
         label_visibility="collapsed",
     )
 
-    st.markdown("##### \U0001f4ac Your Question")
+    st.markdown("##### Your Question")
     question = st.text_area(
         "Your Question",
         key="nr_question",

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  RAYSERR Lens floating-assistant mark (RAYAAAA-269).
+
+  A friendly robot standing in front of the RAYSERR badge, in the brand
+  navy (#1b2f5b) + teal (#2a9d8f) palette (RAYAAAA-260). Emoji-free vector art;
+  used as the bottom-right assistant FAB face (main.py CSS background-image) and
+  as the browser tab icon. Self-contained: the teal disc is part of the art so it
+  reads on any surface.
+-->
+<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="RAYSERR Lens assistant">
+  <defs>
+    <linearGradient id="rl-disc" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2fb0a0"/>
+      <stop offset="1" stop-color="#1f7a6d"/>
+    </linearGradient>
+    <linearGradient id="rl-body" x1="60" y1="46" x2="60" y2="104" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e9f4f2"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Brand teal disc -->
+  <circle cx="60" cy="60" r="60" fill="url(#rl-disc)"/>
+
+  <!-- RAYSERR badge behind the robot: navy rounded square + teal "R" monogram + wordmark -->
+  <g transform="translate(60 44)">
+    <rect x="-21" y="-24" width="42" height="42" rx="11" fill="#1b2f5b"/>
+    <path d="M-9 -16 h11 a7 7 0 0 1 0 14 h-6 l8 12 h-7 l-7 -11 v11 h-6 z m6 6 v6 h4 a3 3 0 0 0 0 -6 z"
+          fill="#3fd0be"/>
+    <text x="0" y="27" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif"
+          font-size="7" font-weight="700" letter-spacing="1.2" fill="#cfe9e4">RAYSERR</text>
+  </g>
+
+  <!-- Robot standing in front of the badge -->
+  <g>
+    <!-- antenna -->
+    <line x1="60" y1="47" x2="60" y2="40" stroke="#1b2f5b" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="60" cy="37" r="4" fill="#3fd0be" stroke="#1b2f5b" stroke-width="2"/>
+    <!-- head -->
+    <rect x="40" y="47" width="40" height="32" rx="12" fill="url(#rl-body)" stroke="#1b2f5b" stroke-width="3"/>
+    <!-- eyes -->
+    <circle cx="52" cy="62" r="4.6" fill="#1b2f5b"/>
+    <circle cx="68" cy="62" r="4.6" fill="#1b2f5b"/>
+    <circle cx="53.4" cy="60.6" r="1.5" fill="#ffffff"/>
+    <circle cx="69.4" cy="60.6" r="1.5" fill="#ffffff"/>
+    <!-- smile -->
+    <path d="M53 71 q7 5 14 0" stroke="#2a9d8f" stroke-width="2.6" stroke-linecap="round" fill="none"/>
+    <!-- ears -->
+    <rect x="35" y="58" width="5" height="10" rx="2.5" fill="#1b2f5b"/>
+    <rect x="80" y="58" width="5" height="10" rx="2.5" fill="#1b2f5b"/>
+    <!-- body -->
+    <rect x="46" y="80" width="28" height="22" rx="8" fill="url(#rl-body)" stroke="#1b2f5b" stroke-width="3"/>
+    <rect x="54" y="86" width="12" height="9" rx="2.5" fill="#2a9d8f"/>
+  </g>
+</svg>

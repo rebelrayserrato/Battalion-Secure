@@ -16,15 +16,16 @@ from __future__ import annotations
 import streamlit as st
 
 from review_engine.app.review_types import REVIEW_TYPES
+from review_engine.app.icons import icon as ui_icon
 from review_engine.dashboard.home import dashboard_stats, recent_requests
 
 # Human-readable labels + chip colours for the four stat tiles. Colours mirror
 # the demo (blue / amber / green / purple) and are semantic, not brand tokens.
 _STAT_TILES = [
-    ("total", "Total Requests", "\U0001f4c4", "#3b82f6"),
-    ("in_progress", "In Progress", "\U0001f552", "#f59e0b"),
-    ("completed", "Completed", "✅", "#10b981"),
-    ("needs_review", "Needs Review", "❗", "#8b5cf6"),
+    ("total", "Total Requests", "document", "#3b82f6"),
+    ("in_progress", "In Progress", "clock", "#f59e0b"),
+    ("completed", "Completed", "check", "#10b981"),
+    ("needs_review", "Needs Review", "alert", "#8b5cf6"),
 ]
 
 _STATUS_LABELS = {
@@ -47,12 +48,12 @@ def _go(nav: str, review_type: str | None = None) -> None:
     st.rerun()
 
 
-def render_dashboard_home(svc, owner_name: str) -> None:
+def render_dashboard_home(svc) -> None:
     # --- Header row: welcome + top-right New Request -------------------------
     head_left, head_right = st.columns([4, 1])
     with head_left:
         st.markdown(
-            f"<h1 class='dash-welcome'>Welcome back, {owner_name}</h1>"
+            "<h1 class='dash-welcome'>Welcome to RAYSERR Lens</h1>"
             "<p class='dash-subtitle'>Here's what's happening with your reviews</p>",
             unsafe_allow_html=True,
         )
@@ -68,7 +69,7 @@ def render_dashboard_home(svc, owner_name: str) -> None:
         with col:
             with st.container(border=True):
                 st.markdown(
-                    f"<div class='stat-chip' style='background:{color}1a;color:{color};'>{icon}</div>"
+                    f"<div class='stat-chip' style='background:{color}1a;color:{color};'>{ui_icon(icon)}</div>"
                     f"<div class='stat-value'>{stats.get(key, 0)}</div>"
                     f"<div class='stat-label'>{label}</div>",
                     unsafe_allow_html=True,
@@ -80,7 +81,7 @@ def render_dashboard_home(svc, owner_name: str) -> None:
     with st.container(border=True):
         title_col, browse_col = st.columns([4, 1])
         with title_col:
-            st.markdown("<h3 class='panel-title'>⚡ Start a Review</h3>", unsafe_allow_html=True)
+            st.markdown("<h3 class='panel-title'>Start a Review</h3>", unsafe_allow_html=True)
         with browse_col:
             st.write("")
             if st.button("Browse all", key="start_browse_all", use_container_width=True):
@@ -91,7 +92,7 @@ def render_dashboard_home(svc, owner_name: str) -> None:
                 with st.container(border=True):
                     st.markdown(
                         f"<div class='review-card'>"
-                        f"<span class='review-chip' style='background:{rt.color}1a;color:{rt.color};'>{rt.icon}</span>"
+                        f"<span class='review-chip' style='background:{rt.color}1a;color:{rt.color};'>{ui_icon(rt.icon)}</span>"
                         f"<span class='review-text'><span class='review-title'>{rt.title}</span>"
                         f"<span class='review-sub'>{rt.subtitle}</span></span></div>",
                         unsafe_allow_html=True,
@@ -128,8 +129,8 @@ def render_dashboard_home(svc, owner_name: str) -> None:
                     )
     with admin_col:
         with st.container(border=True):
-            st.markdown("<h3 class='panel-title'>📖 Admin</h3>", unsafe_allow_html=True)
-            if st.button("🕒  Review Queue", key="admin_review_queue", use_container_width=True):
+            st.markdown("<h3 class='panel-title'>Admin</h3>", unsafe_allow_html=True)
+            if st.button("Review Queue", key="admin_review_queue", use_container_width=True):
                 _go("review_queue")
-            if st.button("📚  Policy Library", key="admin_policy_library", use_container_width=True):
+            if st.button("Policy Library", key="admin_policy_library", use_container_width=True):
                 _go("policy_library")

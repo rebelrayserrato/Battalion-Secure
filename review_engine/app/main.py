@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import base64
 import os
 
 import streamlit as st
 
 from review_engine.app.dashboard_home import render_dashboard_home
+from review_engine.app.icons import icon as ui_icon
 from review_engine.app.new_request import render_new_request
 from review_engine.app.policy_audit import PolicyAuditor
 from review_engine.app.policy_library_view import render_policy_library
@@ -28,16 +30,25 @@ from review_engine.dashboard.view import render_dashboard
 from review_engine.reports.decisions import default_decisions_path, load_decisions
 from review_engine.reviewer import decisions as reviewer_decisions
 
+# RAYAAAA-269: the assistant/brand mark is a generated emoji-free robot SVG
+# (robot standing in front of the RAYSERR badge). Loaded once and reused as the
+# browser tab icon and, base64-inlined, as the floating-assistant FAB face.
+_ASSET_DIR = os.path.join(os.path.dirname(__file__), "assets")
+_ROBOT_SVG_PATH = os.path.join(_ASSET_DIR, "robot-assistant.svg")
+
+
+def _robot_svg_data_uri() -> str:
+    """Base64 data URI of the robot mark for use as a CSS background-image."""
+    with open(_ROBOT_SVG_PATH, "rb") as fh:
+        b64 = base64.b64encode(fh.read()).decode("ascii")
+    return f"data:image/svg+xml;base64,{b64}"
+
+
 st.set_page_config(
-    page_title="Aich-R · AI Document Review · RAYSERR",
-    page_icon="🛡️",
+    page_title="RAYSERR Lens · AI Document Review",
+    page_icon=_ROBOT_SVG_PATH,
     layout="wide",
 )
-
-# The owner (single-tenant, owner-internal). Env-overridable so the demo greeting
-# is not hard-coded, defaulting to the account owner's name.
-OWNER_NAME = os.getenv("REVIEW_ENGINE_OWNER_NAME", "Nathaniel")
-OWNER_ROLE = os.getenv("REVIEW_ENGINE_OWNER_ROLE", "Admin")
 
 # RAYAAAA-260: reskin to match the live marketing site (rayserrsolutions.com) and
 # add a teal accent (owner ask, RAYAAAA-191). RAYAAAA-263: extend the same tokens
@@ -100,14 +111,15 @@ st.markdown(
         box-shadow: var(--rs-shadow);
       }
 
-      /* --- RAYAAAA-263: base44 "Aich-R" shell --------------------------------- */
+      /* --- RAYAAAA-263/269: RAYSERR Lens shell -------------------------------- */
       section[data-testid="stSidebar"] > div { padding-top: 1rem; }
 
-      /* Sidebar brand lockup (shield + Aich-R / AI DOCUMENT REVIEW). */
+      /* Sidebar brand lockup (R monogram + RAYSERR Lens / AI DOCUMENT REVIEW). */
       .aichr-brand { display:flex; align-items:center; gap:0.6rem; padding:0.25rem 0.35rem 0.6rem; }
       .aichr-brand .shield { width:36px;height:36px;border-radius:9px;
         background:linear-gradient(135deg,#2a9d8f,#238577);display:flex;align-items:center;
-        justify-content:center;font-size:1.15rem;box-shadow:var(--rs-shadow); }
+        justify-content:center;font-size:1.15rem;box-shadow:var(--rs-shadow);
+        color:#fff;font-weight:700;font-family:Georgia,serif; }
       .aichr-brand .brand-text { display:flex;flex-direction:column;line-height:1.12; }
       .aichr-brand .brand-name { color:#fff;font-weight:700;font-size:1.08rem;font-family:Georgia,serif; }
       .aichr-brand .brand-tag { color:#9fb3d4;font-size:0.62rem;letter-spacing:1px;font-weight:600; }
@@ -128,17 +140,6 @@ st.markdown(
         background:var(--rs-teal) !important; color:#fff !important; font-weight:600;
         box-shadow:var(--rs-shadow);
       }
-
-      /* User footer (name / role + logout). */
-      .aichr-footer { border-top:1px solid rgba(255,255,255,0.12); margin-top:1.1rem;
-        padding-top:0.8rem; display:flex; align-items:center; gap:0.6rem; }
-      .aichr-footer .avatar { width:32px;height:32px;border-radius:50%;background:var(--rs-teal);
-        color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700; }
-      .aichr-footer .who { display:flex;flex-direction:column;line-height:1.15; }
-      .aichr-footer .who .u-name { color:#fff;font-weight:600;font-size:0.85rem; }
-      .aichr-footer .who .u-role { color:#9fb3d4;font-size:0.7rem; }
-      .aichr-footer a.logout { margin-left:auto;color:#9fb3d4;text-decoration:none;font-size:1.1rem; }
-      .aichr-footer a.logout:hover { color:#fff; }
 
       /* Dashboard headers + panels. */
       .dash-welcome { font-size:2rem; margin:0 0 0.1rem; }
@@ -166,27 +167,40 @@ st.markdown(
       .recent-meta { color:#8a93a6;font-size:0.82rem; }
       .empty-note { text-align:center;color:#8a93a6;padding:2rem 0; }
 
-      /* Floating assistant: fixed bottom-right FAB + teal-gradient panel. */
+      /* Floating assistant: fixed bottom-right FAB + teal-gradient panel.
+         RAYAAAA-269: bigger FAB whose face is the generated robot mark
+         (background-image set below, base64-inlined from assets/robot-assistant.svg).
+         The text label ("Assistant") is kept for screen readers but hidden. */
       div[data-testid="stPopover"] { position:fixed; bottom:1.5rem; right:1.5rem;
         z-index:1000; width:auto; }
       div[data-testid="stPopover"] > button {
-        border-radius:50% !important; width:58px; height:58px; padding:0; font-size:1.5rem;
-        background:linear-gradient(135deg,#2a9d8f,#238577) !important; color:#fff !important;
-        border:none !important; box-shadow:var(--rs-shadow-md);
-      }
-      div[data-testid="stPopover"] > button:hover { background:var(--rs-teal-hover) !important; }
+        border-radius:50% !important; width:74px; height:74px; padding:0;
+        font-size:0 !important; color:transparent !important;
+        background:linear-gradient(135deg,#2a9d8f,#238577) !important;
+        background-size:cover !important; background-position:center !important;
+        border:3px solid #fff !important; box-shadow:var(--rs-shadow-md);
+        transition:transform .12s ease; }
+      div[data-testid="stPopover"] > button:hover { transform:scale(1.06); }
       div[data-testid="stPopoverBody"] { min-width:340px; max-width:380px; }
       .aichr-assistant-header { display:flex;align-items:center;gap:0.6rem;
         background:linear-gradient(135deg,#2a9d8f,#1f7a6d); margin:-1rem -1rem 0.8rem;
         padding:0.9rem 1rem; border-radius:8px 8px 0 0; }
       .aichr-assistant-badge { width:34px;height:34px;border-radius:9px;
         background:rgba(255,255,255,0.18);display:flex;align-items:center;justify-content:center;
-        font-size:1.1rem; }
+        color:#fff; }
       .aichr-assistant-titles { display:flex;flex-direction:column;line-height:1.15; }
       .aichr-assistant-name { color:#fff;font-weight:700; }
       .aichr-assistant-sub { color:#d6f2ee;font-size:0.72rem; }
     </style>
     """,
+    unsafe_allow_html=True,
+)
+
+# RAYAAAA-269: paint the generated robot mark onto the floating-assistant FAB.
+# Kept separate from the static block above so the base64 data URI stays isolated.
+st.markdown(
+    "<style>div[data-testid=\"stPopover\"] > button {"
+    f"background-image:url('{_robot_svg_data_uri()}') !important;}}</style>",
     unsafe_allow_html=True,
 )
 
@@ -203,27 +217,26 @@ svc = service()
 if "nav" not in st.session_state:
     st.session_state["nav"] = "dashboard"
 
-# MENU + ADMIN nav, mirroring the owner's demo. "MCP Connections" is intentionally
-# OMITTED (cancelled, RAYAAAA-242). Existing features that are not in the demo's
-# menu (the per-jurisdiction Law library, the cross-Task risk dashboard) are
-# re-homed here so nothing is removed: Review Queue -> risk dashboard, plus a
-# Law Library admin item.
+# Single MENU nav, mirroring the owner's demo. RAYAAAA-269: the separate "ADMIN"
+# group and the bottom user/identity footer were removed per owner feedback; the
+# Review Queue (cross-Task risk dashboard) and the per-jurisdiction Law Library
+# the owner still wants are folded into this one MENU so they stay reachable.
+# "MCP Connections" stays OMITTED (cancelled, RAYAAAA-242). Nav items are clean
+# text (no emoji) per the RAYSERR Lens rebrand.
 _NAV_MENU = [
-    ("dashboard", "Dashboard", "🗂️"),
-    ("new_request", "New Request", "➕"),
-    ("my_requests", "My Requests", "📋"),
-    ("policy_library", "Policy Library", "📚"),
-]
-_NAV_ADMIN = [
-    ("review_queue", "Review Queue", "🕒"),
-    ("law_library", "Law Library", "⚖️"),
+    ("dashboard", "Dashboard"),
+    ("new_request", "New Request"),
+    ("my_requests", "My Requests"),
+    ("policy_library", "Policy Library"),
+    ("review_queue", "Review Queue"),
+    ("law_library", "Law Library"),
 ]
 
 
-def _nav_button(key: str, label: str, icon: str) -> None:
+def _nav_button(key: str, label: str) -> None:
     active = st.session_state["nav"] == key
     if st.button(
-        f"{icon}  {label}",
+        label,
         key=f"nav_{key}",
         use_container_width=True,
         type="primary" if active else "secondary",
@@ -233,10 +246,11 @@ def _nav_button(key: str, label: str, icon: str) -> None:
 
 
 with st.sidebar:
-    # Brand lockup: Aich-R shield + "AI DOCUMENT REVIEW".
+    # Brand lockup: RAYSERR Lens "R" monogram + "AI DOCUMENT REVIEW" (RAYAAAA-269
+    # rebrand; the shield emoji is replaced by a clean teal "R" tile).
     st.markdown(
-        "<div class='aichr-brand'><div class='shield'>🛡️</div>"
-        "<div class='brand-text'><span class='brand-name'>Aich-R</span>"
+        "<div class='aichr-brand'><div class='shield'>R</div>"
+        "<div class='brand-text'><span class='brand-name'>RAYSERR Lens</span>"
         "<span class='brand-tag'>AI DOCUMENT REVIEW</span></div></div>",
         unsafe_allow_html=True,
     )
@@ -252,24 +266,14 @@ with st.sidebar:
     )
 
     st.markdown("<div class='nav-section'>MENU</div>", unsafe_allow_html=True)
-    for _key, _label, _icon in _NAV_MENU:
-        _nav_button(_key, _label, _icon)
+    for _key, _label in _NAV_MENU:
+        _nav_button(_key, _label)
 
-    st.markdown("<div class='nav-section'>ADMIN</div>", unsafe_allow_html=True)
-    for _key, _label, _icon in _NAV_ADMIN:
-        _nav_button(_key, _label, _icon)
-
-    # User footer (name / role + logout). Auth is enforced by the nginx proxy;
-    # "logout" links back to the admin console (no in-app auth change).
-    st.markdown(
-        "<div class='aichr-footer'>"
-        f"<div class='avatar'>{OWNER_NAME[:1].upper()}</div>"
-        f"<div class='who'><span class='u-name'>{OWNER_NAME}</span>"
-        f"<span class='u-role'>{OWNER_ROLE}</span></div>"
-        "<a class='logout' href='https://rayserrsolutions.com/admin' target='_top' "
-        "title='Return to admin console'>⎋</a></div>",
-        unsafe_allow_html=True,
-    )
+    # RAYAAAA-269: the bottom user/identity footer (avatar + name + role + logout)
+    # was removed per owner feedback ("remove admin section from the bottom parts,
+    # all"). The "Back to RAYSERR Admin" link above returns to the admin console,
+    # so it also serves as the logout affordance (auth is enforced by the nginx
+    # proxy; no in-app auth change).
 
 # RAYAAAA-259/263: the always-here floating assistant, rendered ONCE here (outside
 # every view branch) so it is present on every view, backed by the LOCAL model
@@ -859,10 +863,10 @@ def _render_task_workspace(svc, matter, matter_id) -> None:
         else:
             status_options = list(reviewer_decisions.VALID_STATUSES)
             status_labels = {
-                "approved": "✅ Approved",
-                "rejected": "❌ Rejected",
-                "needs_changes": "✏️ Needs changes",
-                "undecided": "⏳ Undecided",
+                "approved": "Approved",
+                "rejected": "Rejected",
+                "needs_changes": "Needs changes",
+                "undecided": "Undecided",
             }
             reviewer = st.text_input("Reviewer", value="reviewer", key="review_reviewer")
             with st.form("reviewer_decisions_form"):
@@ -901,7 +905,7 @@ def _render_task_workspace(svc, matter, matter_id) -> None:
 # ---------------------------------------------------------------------------
 nav = st.session_state["nav"]
 if nav == "dashboard":
-    render_dashboard_home(svc, OWNER_NAME)
+    render_dashboard_home(svc)
 elif nav == "new_request":
     _render_new_request(svc)
 elif nav == "policy_library":
@@ -914,4 +918,4 @@ elif nav == "review_queue":
 elif nav == "my_requests":
     _render_my_requests(svc)
 else:
-    render_dashboard_home(svc, OWNER_NAME)
+    render_dashboard_home(svc)
