@@ -126,7 +126,7 @@ def _render_answer(answer: ModelAnswer) -> None:
     st.markdown(f"**{answer.label}** · `{answer.model}`")
     if answer.mock:
         st.caption(
-            "⚠️ Mock response — no provider key configured (or egress disabled). "
+            "Mock response — no provider key configured (or egress disabled). "
             "Synthetic placeholder, not a real model answer."
         )
     if not answer.ok:

@@ -28,6 +28,7 @@ import os
 import streamlit as st
 
 from review_engine.app.cross_task import CrossTaskAccessError, assistant_enabled
+from review_engine.app.icons import icon as ui_icon
 from review_engine.app.local_assistant import FloatingAssistant
 from review_engine.clients.jurisdictions import state_label
 
@@ -35,7 +36,12 @@ from review_engine.clients.jurisdictions import state_label
 # closed popover trigger is that FAB (just the icon — main.py CSS makes it round
 # and pins it bottom-right). The panel's own teal-gradient header carries the
 # "Aich-R Assistant · AI-powered · Always here" label from the demo.
-_WIDGET_LABEL = "💬"
+# RAYAAAA-269: the FAB face is the generated robot mark (main.py CSS paints it
+# as a background-image and hides this text label); the text is kept for
+# screen readers.
+_WIDGET_LABEL = "Assistant"
+# Small monochrome robot glyph for the panel header badge (emoji-free).
+_ROBOT_BADGE = ui_icon("robot", 20)
 # Session key holding the last reply so it persists across the popover's reruns.
 _REPLY_KEY = "_floating_assistant_reply"
 
@@ -62,9 +68,9 @@ def _render_panel(svc) -> None:
     # owner's "Aich-R Assistant · AI-powered · Always here" widget chrome.
     st.markdown(
         "<div class='aichr-assistant-header'>"
-        "<span class='aichr-assistant-badge'>\U0001f4bc</span>"
+        f"<span class='aichr-assistant-badge'>{_ROBOT_BADGE}</span>"
         "<span class='aichr-assistant-titles'>"
-        "<span class='aichr-assistant-name'>Aich-R Assistant</span>"
+        "<span class='aichr-assistant-name'>RAYSERR Lens</span>"
         "<span class='aichr-assistant-sub'>AI-powered · Always here</span>"
         "</span></div>",
         unsafe_allow_html=True,
