@@ -42,6 +42,12 @@ POLICY_INDEXES_DIR = DATA_DIR / "policy_indexes"
 # stores) can never touch the law corpus. See ``review_engine/law``.
 LAW_UPLOADS_DIR = DATA_DIR / "law_uploads"
 LAW_INDEXES_DIR = DATA_DIR / "law_indexes"
+# RAYAAAA-274 (270 P2): web-fetched law is written to a PENDING-REVIEW staging
+# area — NEVER the live law index. This directory holds the un-approved,
+# owner-must-review records the RAYAAAA-275 UI lists; only owner approval moves a
+# staged document into ``LAW_INDEXES_DIR``. Kept separate from LAW_UPLOADS_DIR so
+# staged web material can never be mistaken for an owner-vetted upload.
+LAW_STAGING_DIR = DATA_DIR / "law_staging"
 DATABASE_PATH = DATA_DIR / "review_engine.sqlite3"
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
@@ -92,6 +98,34 @@ MCP_FORCE_MOCK = _env_flag("MCP_MOCK", False)
 CROSS_TASK_ASSISTANT_ENABLED = _env_flag("CROSS_TASK_ASSISTANT_ENABLED", False)
 CROSS_TASK_ASSISTANT_TOKEN = os.getenv("CROSS_TASK_ASSISTANT_TOKEN")
 
+# --- Web-connected law ingest (RAYAAAA-274, 270 Phase P2) -------------------
+# Owner-requested "search official gov sources and add the law to the Law
+# Library". This is INERT by default and must stay OFF until the full 270 gate
+# is green (Counsel 271 conditions A–E, CTO 272 conditions, DPIA addendum 277,
+# Sec/QA 276). When OFF, the pipeline refuses to run at all — no adapter is
+# constructed, no URL is built, nothing crosses the egress proxy.
+#
+# Even when ON it is bounded, per the counsel/CTO conditions:
+#   * outbound calls go ONLY to the exact hosts in LAW_OFFICIAL_SOURCE_HOSTS
+#     (exact hostname, no wildcard) over https/443, via the RAYAAAA-273 egress
+#     proxy (HTTPS_PROXY) — the default-deny allowlist is the sole egress path;
+#   * only a STRUCTURED, no-PII query (jurisdiction + citation) is ever put on
+#     the wire — free text stays local (CTO/Counsel Condition C), enforced at
+#     the query contract, not by post-filtering;
+#   * fetched law is written to LAW_STAGING_DIR (Pending Review) ONLY — never
+#     the live index — and requires owner approval (RAYAAAA-275) to go live.
+LAW_WEB_INGEST_ENABLED = _env_flag("LAW_WEB_INGEST_ENABLED", False)
+
+# Exact hostnames the law-ingest adapters may reach. Exact match ONLY (no
+# ``*.gov`` wildcard, per CTO RAYAAAA-272): each is an official structured API of
+# a US-government publisher of public-domain law. This list is the code-side twin
+# of the RAYAAAA-273 egress-proxy allowlist; both must agree.
+LAW_OFFICIAL_SOURCE_HOSTS = (
+    "api.govinfo.gov",    # GPO govinfo — U.S. Code, CFR, Public Laws
+    "api.congress.gov",   # Library of Congress — bills, public laws
+    "api.ecfr.gov",       # eCFR — Code of Federal Regulations
+)
+
 
 def ensure_directories() -> None:
     for path in (
@@ -105,5 +139,6 @@ def ensure_directories() -> None:
         POLICY_INDEXES_DIR,
         LAW_UPLOADS_DIR,
         LAW_INDEXES_DIR,
+        LAW_STAGING_DIR,
     ):
         path.mkdir(parents=True, exist_ok=True)
