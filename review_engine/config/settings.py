@@ -42,6 +42,14 @@ POLICY_INDEXES_DIR = DATA_DIR / "policy_indexes"
 # stores) can never touch the law corpus. See ``review_engine/law``.
 LAW_UPLOADS_DIR = DATA_DIR / "law_uploads"
 LAW_INDEXES_DIR = DATA_DIR / "law_indexes"
+# RAYAAAA-275 (RAYAAAA-270 P3): the "Pending Review" staging area for laws that
+# the web-ingest pipeline (RAYAAAA-274 P2) fetched from official government
+# publishers but that have NOT yet been approved into the live law index. Nothing
+# here is retrievable/citable — it is a holding pen keyed by jurisdiction; only an
+# explicit owner Approve moves a record through the RAYAAAA-251 provenance-enforced
+# upload into ``LAW_UPLOADS_DIR``/the live index. Kept apart from the live corpus so
+# a pending item can never leak into a grounded answer.
+LAW_STAGING_DIR = DATA_DIR / "law_staging"
 DATABASE_PATH = DATA_DIR / "review_engine.sqlite3"
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
@@ -92,6 +100,18 @@ MCP_FORCE_MOCK = _env_flag("MCP_MOCK", False)
 CROSS_TASK_ASSISTANT_ENABLED = _env_flag("CROSS_TASK_ASSISTANT_ENABLED", False)
 CROSS_TASK_ASSISTANT_TOKEN = os.getenv("CROSS_TASK_ASSISTANT_TOKEN")
 
+# --- Web-connected law ingest (RAYAAAA-270) --------------------------------
+# Master feature flag for the official-gov-source web law-ingest capability
+# (egress proxy P1 / fetch+extract pipeline P2 / this "Pending Review" queue P3).
+# OFF by default and INERT until the full RAYAAAA-270 cutover clears its gates
+# (Counsel Cond A–E on RAYAAAA-271, CTO egress conditions on RAYAAAA-272, Sec/QA
+# no-PII-egress verify RAYAAAA-276, and the DPIA addendum RAYAAAA-277). When OFF:
+# the pipeline performs no egress and the Law Library shows no Pending Review
+# queue, so nothing web-fetched can exist, let alone reach the live index.
+# Turning the flag ON never bypasses owner approval — auto-add stays FORBIDDEN
+# (RAYAAAA-243 / Counsel + CTO-5); the flag only makes the staged queue visible.
+LAW_WEB_INGEST_ENABLED = _env_flag("LAW_WEB_INGEST_ENABLED", False)
+
 
 def ensure_directories() -> None:
     for path in (
@@ -105,5 +125,6 @@ def ensure_directories() -> None:
         POLICY_INDEXES_DIR,
         LAW_UPLOADS_DIR,
         LAW_INDEXES_DIR,
+        LAW_STAGING_DIR,
     ):
         path.mkdir(parents=True, exist_ok=True)

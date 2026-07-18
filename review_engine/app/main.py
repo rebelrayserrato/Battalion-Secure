@@ -21,6 +21,8 @@ from review_engine.law.library import (
     law_jurisdiction_label,
     resolve_law_jurisdictions,
 )
+from review_engine.law.staging import LawStagingStore, StagingApprovalError
+from review_engine.config.settings import LAW_WEB_INGEST_ENABLED
 from review_engine.llm_connectors.ollama import OllamaConnector
 from review_engine.privacy.erasure import erase_matter
 from review_engine.reports.generator import generate_docx_report, generate_pdf_report
@@ -318,9 +320,96 @@ def _render_new_request(svc) -> None:
     render_new_request(svc, clients, client_label)
 
 
+def _render_law_pending_review(svc) -> None:
+    # RAYAAAA-275 (RAYAAAA-270 P3): the "Pending Review" staging queue. Web-fetched
+    # laws (RAYAAAA-274 P2) land here and go NOWHERE near the live index until the
+    # owner clicks Approve — auto-add is FORBIDDEN (RAYAAAA-243 / Counsel + CTO-5).
+    # The whole section is gated behind LAW_WEB_INGEST_ENABLED (OFF by default), so
+    # the surface is INERT until the RAYAAAA-270 cutover clears its gates.
+    if not LAW_WEB_INGEST_ENABLED:
+        return
+    store = LawStagingStore()
+    pending = store.list_pending()
+    st.markdown("### Pending review — web-fetched laws")
+    st.caption(
+        "Laws the AI search fetched from official government publishers, awaiting "
+        "your decision. Nothing here is searchable or citable yet. Approve adds a "
+        "record to the live law library (with its provenance); Reject discards it. "
+        "Every decision is logged. Auto-add is disabled by policy."
+    )
+    if not pending:
+        st.info("No web-fetched laws are waiting for review.")
+    for item in pending:
+        badges = []
+        badges.append("✅ Official source" if item.official_source else "⚠️ Source not verified official")
+        badges.append("📜 Statutory text only" if item.statutory_only else "⚠️ Annotated — not pure statute")
+        with st.container(border=True):
+            st.markdown(f"**{item.jurisdiction_label}** &nbsp; · &nbsp; " + " &nbsp; ".join(badges))
+            meta_cols = st.columns(2)
+            with meta_cols[0]:
+                st.markdown(f"**Source:** {item.source_name or '—'}")
+                st.markdown(f"**Source URL:** [{item.source_url}]({item.source_url})")
+            with meta_cols[1]:
+                st.markdown(f"**Retrieved:** {item.retrieved or '—'}")
+                st.markdown(f"**Effective / version:** {item.effective or '—'}")
+            if item.provenance_extra:
+                st.caption(
+                    "Provenance: "
+                    + ", ".join(f"{k}={v}" for k, v in item.provenance_extra.items())
+                )
+            with st.expander("Extracted-text preview"):
+                st.text(item.text_preview or "(no text extracted)")
+            can_approve = item.official_source and item.statutory_only
+            act_cols = st.columns([1, 1, 3])
+            with act_cols[0]:
+                if st.button(
+                    "Approve → add to library",
+                    key=f"law_stage_approve_{item.id}",
+                    type="primary",
+                    disabled=not can_approve,
+                    help=None if can_approve else "Blocked: must be an official source AND pure statutory text (Counsel Cond A/B).",
+                ):
+                    try:
+                        result = store.approve(item.id, svc, decided_by=OWNER_NAME)
+                        st.success(
+                            f"Approved into {law_jurisdiction_label(result['jurisdiction'])} "
+                            f"law library ({result.get('chunks', 0)} chunks indexed)."
+                        )
+                        st.rerun()
+                    except (StagingApprovalError, ValueError) as exc:
+                        st.error(str(exc))
+            with act_cols[1]:
+                if st.button("Reject", key=f"law_stage_reject_{item.id}"):
+                    store.reject(item.id, decided_by=OWNER_NAME, reason="owner rejected in review queue")
+                    st.info("Discarded. It was not added to the law library.")
+                    st.rerun()
+    audit = store.audit_entries(limit=10)
+    if audit:
+        with st.expander("Recent review decisions (audit trail)"):
+            st.dataframe(
+                [
+                    {
+                        "When": e.get("at"),
+                        "Decision": e.get("action"),
+                        "By": e.get("decided_by"),
+                        "Jurisdiction": law_jurisdiction_label(e.get("jurisdiction", "")),
+                        "Source": e.get("source_name"),
+                        "Source URL": e.get("source_url"),
+                    }
+                    for e in audit
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+    st.divider()
+
+
 def _render_law_library(svc) -> None:
     # RAYAAAA-251 (Phase C): per-JURISDICTION law corpus (statute/regulation text
     # from OFFICIAL government publishers, per the RAYAAAA-243 Counsel memo).
+    # RAYAAAA-275: the web-ingest "Pending Review" queue renders above the manual
+    # upload surface (INERT unless LAW_WEB_INGEST_ENABLED).
+    _render_law_pending_review(svc)
     st.subheader("Law reference library")
     st.caption(
         "Upload statute/regulation text from OFFICIAL government publishers "
