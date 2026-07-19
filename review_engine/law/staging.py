@@ -313,3 +313,59 @@ class LawStagingStore:
         }
         with self.audit_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+class LawStagingSink:
+    """The P2↔P3 seam (RAYAAAA-287): adapt the RAYAAAA-274 pipeline's
+    :class:`~review_engine.law.web.staging.StagingSink` protocol onto the
+    RAYAAAA-275 :class:`LawStagingStore`.
+
+    Before this, the pipeline defaulted to :class:`WebLawStagingStore`, which
+    parks records under ``LAW_STAGING_DIR/<jurisdiction>/*.json`` — a *different*
+    layout from the ``LAW_STAGING_DIR/pending/*.json`` queue the owner Pending
+    Review UI (:meth:`LawStagingStore.list_pending`) actually reads, so
+    web-fetched law never showed up for the owner. Injecting this sink makes the
+    pipeline write into the SINGLE store the UI reads — one store, one directory.
+
+    Mapping :class:`~review_engine.law.web.staging.StagedLawDocument` →
+    :class:`PendingLaw`:
+
+    * The pipeline has already run statutory-only extraction, so its provenance
+      ``content_type`` is invariably ``"statutory"`` (:meth:`WebLawProvenance.validate`
+      rejects anything else); we surface that as ``statutory_only=True`` so
+      :meth:`LawStagingStore.approve` Cond B passes. ``contained_annotations``
+      (apparatus that was *found and stripped*) is preserved in ``provenance_extra``
+      for the audit, but does not block approval — the stored text is pure statute.
+    * ``official_source`` carries the allowlisted-publisher fact the pipeline
+      validated; :meth:`approve` Cond A re-checks it before any RAYAAAA-251 upload.
+
+    Auto-add stays FORBIDDEN: this only *stages* — the owner must still Approve.
+    """
+
+    def __init__(self, store: "LawStagingStore | None" = None):
+        self.store = store or LawStagingStore()
+
+    def stage(self, record) -> str:
+        prov = record.provenance
+        # The staged chunks already hold ONLY statutory text (annotations were
+        # dropped in extraction); re-join them into the document the owner will
+        # promote verbatim into the 251 index.
+        text = "\n\n".join(c.text for c in record.chunks)
+        return self.store.stage(
+            jurisdiction=record.jurisdiction,
+            source_url=prov.source_url,
+            source_name=prov.source_name,
+            retrieved=prov.retrieved,
+            effective=prov.effective,
+            text=text,
+            official_source=bool(prov.official_source),
+            statutory_only=(prov.content_type == "statutory"),
+            suggested_filename=record.document_name,
+            provenance_extra={
+                "source_system": prov.source_system,
+                "content_type": prov.content_type,
+                "contained_annotations": bool(prov.contained_annotations),
+                "dropped_annotation_count": record.dropped_annotation_count,
+                "chunk_count": len(record.chunks),
+            },
+        )
