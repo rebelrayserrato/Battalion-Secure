@@ -42,11 +42,13 @@ POLICY_INDEXES_DIR = DATA_DIR / "policy_indexes"
 # stores) can never touch the law corpus. See ``review_engine/law``.
 LAW_UPLOADS_DIR = DATA_DIR / "law_uploads"
 LAW_INDEXES_DIR = DATA_DIR / "law_indexes"
-# RAYAAAA-274 (270 P2): web-fetched law is written to a PENDING-REVIEW staging
-# area — NEVER the live law index. This directory holds the un-approved,
-# owner-must-review records the RAYAAAA-275 UI lists; only owner approval moves a
-# staged document into ``LAW_INDEXES_DIR``. Kept separate from LAW_UPLOADS_DIR so
-# staged web material can never be mistaken for an owner-vetted upload.
+# RAYAAAA-275 (RAYAAAA-270 P3): the "Pending Review" staging area for laws that
+# the web-ingest pipeline (RAYAAAA-274 P2) fetched from official government
+# publishers but that have NOT yet been approved into the live law index. Nothing
+# here is retrievable/citable — it is a holding pen keyed by jurisdiction; only an
+# explicit owner Approve moves a record through the RAYAAAA-251 provenance-enforced
+# upload into ``LAW_UPLOADS_DIR``/the live index. Kept apart from the live corpus so
+# a pending item can never leak into a grounded answer.
 LAW_STAGING_DIR = DATA_DIR / "law_staging"
 DATABASE_PATH = DATA_DIR / "review_engine.sqlite3"
 
