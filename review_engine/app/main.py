@@ -192,7 +192,7 @@ st.markdown(
       /* Floating assistant: fixed bottom-right FAB + teal-gradient panel.
          RAYAAAA-269: bigger FAB whose face is the generated robot mark
          (background-image set below, base64-inlined from assets/robot-assistant.svg).
-         The text label ("Assistant") is kept for screen readers but hidden. */
+         The text label ("Rai.8") is kept for screen readers but hidden. */
       div[data-testid="stPopover"] { position:fixed; bottom:1.5rem; right:1.5rem;
         z-index:1000; width:auto; }
       div[data-testid="stPopover"] > button {
