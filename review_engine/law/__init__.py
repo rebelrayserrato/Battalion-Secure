@@ -25,8 +25,16 @@ from review_engine.law.library import (
     resolve_law_jurisdictions,
     validate_law_jurisdiction,
 )
+from review_engine.law.staging import (
+    LawStagingStore,
+    PendingLaw,
+    StagingApprovalError,
+)
 
 __all__ = [
+    "LawStagingStore",
+    "PendingLaw",
+    "StagingApprovalError",
     "FEDERAL_JURISDICTION",
     "LAW_DISCLAIMER",
     "LAW_JURISDICTION_CHOICES",
