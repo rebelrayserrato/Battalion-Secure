@@ -38,7 +38,7 @@ from review_engine.law.web import (
     SOURCE_SYSTEMS,
     WebLawIngestPipeline,
 )
-from review_engine.law.web.adapters import EgressBlocked
+from review_engine.law.web.adapters import EgressBlocked, MissingCredential
 from review_engine.law.web.pipeline import EmptyStatutoryText
 from review_engine.config.settings import LAW_WEB_INGEST_ENABLED
 from review_engine.llm_connectors.ollama import OllamaConnector
@@ -430,6 +430,12 @@ def _render_law_web_search(store: LawStagingStore) -> None:
                 st.rerun()
             except NoPIIViolation as exc:
                 st.error(f"Query rejected (not a valid citation locator): {exc}")
+            except MissingCredential as exc:
+                st.warning(
+                    "This source needs an api.data.gov API key that isn't configured "
+                    "yet — it's inert until an admin provisions it. eCFR needs no key. "
+                    f"({exc})"
+                )
             except EgressBlocked as exc:
                 st.error(f"Blocked outbound request: {exc}")
             except JurisdictionLeak as exc:
