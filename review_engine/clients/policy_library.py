@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from review_engine.clients.storage import validate_client_id
 from review_engine.config.settings import POLICY_INDEXES_DIR
 from review_engine.evidence.index import EvidenceIndex
 
@@ -44,6 +45,11 @@ class PolicyLibraryIndex(EvidenceIndex):
     """
 
     def __init__(self, client_id: str, root: str | Path = POLICY_INDEXES_DIR):
+        # RAYAAAA-303: the client id is the sole path key for this store, so it
+        # is validated as a safe namespace token here (defence in depth — even a
+        # caller that skips the storage-ACL seam cannot drive the index over a
+        # traversal path). Raises ClientAccessError on an unsafe id.
+        client_id = validate_client_id(client_id)
         super().__init__(
             client_id, root=root, collection_prefix=POLICY_COLLECTION_PREFIX
         )

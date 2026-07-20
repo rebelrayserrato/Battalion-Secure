@@ -6,6 +6,11 @@ from pathlib import Path
 
 from review_engine.audits.database import ReviewDatabase
 from review_engine.clients.policy_library import PolicyLibraryIndex
+from review_engine.clients.storage import (
+    ClientScope,
+    client_policy_upload_dir,
+    require_client,
+)
 from review_engine.compare.redline import ComparisonResult, compare_documents
 from review_engine.config.settings import (
     LAW_UPLOADS_DIR,
@@ -110,19 +115,35 @@ class ReviewService:
     # there is no parallel ingestion system. Storage is client-scoped and lives
     # apart from every Task workspace.
 
-    def save_policy_upload(self, client_id: str, name: str, content: bytes) -> Path:
+    def save_policy_upload(
+        self,
+        client_id: str,
+        name: str,
+        content: bytes,
+        *,
+        scope: ClientScope | None = None,
+    ) -> Path:
+        # RAYAAAA-303: the per-client storage ACL is the single enforcement
+        # point. ``require_client`` validates ``client_id`` as a safe namespace
+        # token and — when a P1 (RAYAAAA-302) session ``scope`` is supplied —
+        # rejects any attempt to write under a different client than the one the
+        # request is authenticated as (strictly per-tenant create/reject).
+        client_id = require_client(scope, client_id)
         clean_name = safe_filename(name)
         extension = Path(clean_name).suffix.lower()
         if extension not in SUPPORTED_EXTENSIONS:
             raise ValueError(f"Unsupported file type: {extension}")
-        target_dir = POLICY_UPLOADS_DIR / client_id
-        target_dir.mkdir(parents=True, exist_ok=True)
+        # Path is derived + containment-checked here, never a bare
+        # POLICY_UPLOADS_DIR / client_id join.
+        target_dir = client_policy_upload_dir(client_id)
         target = target_dir / clean_name
         target.write_bytes(content)
         self.db.add_policy_document(client_id, clean_name, target)
         return target
 
-    def process_policy_library(self, client_id: str) -> dict:
+    def process_policy_library(
+        self, client_id: str, *, scope: ClientScope | None = None
+    ) -> dict:
         """Extract + (re)index a Client's uploaded policy documents.
 
         Chunks are salted by ``client_id`` (passed as the extractor's matter_id),
@@ -130,6 +151,7 @@ class ReviewService:
         ``PolicyLibraryIndex`` — a physically separate Chroma store keyed by the
         client id, so it can never be reached from another client's Task query.
         """
+        client_id = require_client(scope, client_id)  # RAYAAAA-303 per-tenant gate
         processed = 0
         errors: list[str] = []
         for document in self.db.list_policy_documents(client_id):
@@ -150,15 +172,46 @@ class ReviewService:
             self.db.log("error", None, f"policy index {client_id}: {exc}")
         return {"processed": processed, "chunks": len(chunks), "errors": errors}
 
-    def policy_search(self, client_id: str, query: str, limit: int = 8) -> list[dict]:
+    def policy_search(
+        self,
+        client_id: str,
+        query: str,
+        limit: int = 8,
+        *,
+        scope: ClientScope | None = None,
+    ) -> list[dict]:
+        client_id = require_client(scope, client_id)  # RAYAAAA-303 per-tenant gate
         return PolicyLibraryIndex(client_id).search(query, limit)
 
-    def delete_policy_document(self, client_id: str, document_name: str) -> dict:
+    def delete_policy_document(
+        self, client_id: str, document_name: str, *, scope: ClientScope | None = None
+    ) -> dict:
         """Remove one policy document and rebuild the client's policy index."""
+        client_id = require_client(scope, client_id)  # RAYAAAA-303 per-tenant gate
         self.db.delete_policy_document(client_id, document_name)
         remaining = self.db.get_policy_chunks(client_id)
         count = PolicyLibraryIndex(client_id).build(remaining)
         return {"remaining_documents": len(self.db.list_policy_documents(client_id)), "chunks": count}
+
+    def erase_client_policy(self, client_id: str) -> dict:
+        """GDPR Art.17 erase of a client's entire policy store (RAYAAAA-303).
+
+        Removes the client's raw policy uploads folder, its policy index, and its
+        ``client_policy_documents`` / ``policy_chunks`` rows so the per-client
+        store participates in the erasure fan-out (RAYAAAA-207) keyed by client
+        identity. Idempotent + fail-loud (a non-clean residual is reported).
+        """
+        from review_engine.privacy.client_erasure import erase_client_policy_store
+
+        report = erase_client_policy_store(client_id, database_path=self.db.path)
+        return {
+            "client_id": report.client_id,
+            "sqlite_rows_deleted": report.sqlite_rows_deleted,
+            "upload_bytes_deleted": report.upload_bytes_deleted,
+            "index_bytes_deleted": report.index_bytes_deleted,
+            "clean": report.clean,
+            "notes": list(report.notes),
+        }
 
     # --- Jurisdiction-scoped law reference library (RAYAAAA-251, Phase C) ---
     #
